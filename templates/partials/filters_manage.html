@@ -1,0 +1,74 @@
+<section class="manage-box" id="manage-names">
+  <h2>カテゴリ・タグの管理</h2>
+  <p class="hint">名前の変更は「保存」、不要なものは「削除」。カテゴリ削除時は GIF は未分類になります。</p>
+
+  <h3 class="manage-subtitle">カテゴリ</h3>
+  {% if categories %}
+    <ul class="meta-rename-list">
+      {% for c in categories %}
+        <li>
+          <form
+            class="inline-form meta-rename-form"
+            hx-post="{{ url_for('rename_category', category_id=c.id) }}"
+            hx-swap="none"
+          >
+            <input type="text" name="name" value="{{ c.name }}" maxlength="64" required aria-label="カテゴリ名">
+            <button type="submit" class="btn btn-small">保存</button>
+            <button
+              type="button"
+              class="btn btn-danger btn-small"
+              hx-post="{{ url_for('delete_category', category_id=c.id, category=active_category, tag=active_tags) }}"
+              hx-swap="none"
+              hx-confirm="カテゴリ「{{ c.name }}」を削除しますか？{% if c.gif_count %}（{{ c.gif_count }} 件の GIF が未分類になります）{% endif %}"
+            >削除</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="hint">カテゴリがまだありません。下のフォームから追加してください。</p>
+  {% endif %}
+  <form
+    class="inline-form"
+    hx-post="{{ url_for('create_category') }}"
+    hx-swap="none"
+  >
+    <input type="text" name="name" placeholder="新しいカテゴリ" maxlength="64" required>
+    <button type="submit" class="btn btn-small">追加</button>
+  </form>
+
+  <h3 class="manage-subtitle">タグ</h3>
+  {% if tags %}
+    <ul class="meta-rename-list">
+      {% for t in tags %}
+        <li>
+          <form
+            class="inline-form meta-rename-form"
+            hx-post="{{ url_for('rename_tag', tag_id=t.id) }}"
+            hx-swap="none"
+          >
+            <input type="text" name="name" value="{{ t.name }}" maxlength="64" required aria-label="タグ名">
+            <button type="submit" class="btn btn-small">保存</button>
+            <button
+              type="button"
+              class="btn btn-danger btn-small"
+              hx-post="{{ url_for('delete_tag', tag_id=t.id, category=active_category, tag=active_tags) }}"
+              hx-swap="none"
+              hx-confirm="タグ「{{ t.name }}」を削除しますか？{% if t.gif_count %}（{{ t.gif_count }} 件の GIF から外れます）{% endif %}"
+            >削除</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="hint">タグがまだありません。下のフォームから追加してください。</p>
+  {% endif %}
+  <form
+    class="inline-form"
+    hx-post="{{ url_for('create_tag') }}"
+    hx-swap="none"
+  >
+    <input type="text" name="name" placeholder="新しいタグ" maxlength="64" required>
+    <button type="submit" class="btn btn-small">追加</button>
+  </form>
+</section>

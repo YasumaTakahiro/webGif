@@ -1,0 +1,6 @@
+<select name="category_id" id="upload-category-select">
+  <option value="">未分類</option>
+  {% for c in categories %}
+    <option value="{{ c.id }}">{{ c.name }}</option>
+  {% endfor %}
+</select>

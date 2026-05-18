@@ -1,0 +1,11 @@
+<div
+  id="gif-load-more"
+  class="load-more-sentinel"
+  hx-get="{{ url_for('partial_gif_list', page=next_page, category=active_category, tag=active_tags) }}"
+  hx-trigger="intersect once root:#gallery"
+  hx-swap="outerHTML"
+>
+  <p class="load-more-hint">
+    {% if total %}全 {{ total }} 件中 {{ loaded }} 件を表示 — {% endif %}続きを読み込み中…
+  </p>
+</div>

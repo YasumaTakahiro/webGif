@@ -1,0 +1,15 @@
+<section class="filter-panel" id="filter-panel" aria-labelledby="filter-panel-heading">
+  <div class="filter-panel-header">
+    <h2 id="filter-panel-heading" class="filter-panel-heading">絞り込み</h2>
+    <button
+      type="button"
+      class="btn btn-ghost btn-small filter-panel-toggle"
+      id="filter-panel-toggle"
+      aria-expanded="true"
+      aria-controls="filter-panel-body"
+    >絞り込みを隠す</button>
+  </div>
+  <div id="filter-panel-body" class="filter-panel-body">
+    {% include "partials/filter_bar.html" %}
+  </div>
+</section>

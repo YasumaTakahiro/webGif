@@ -1,0 +1,5 @@
+{% if gifs %}
+  {% include "partials/gif_list_items.html" %}
+{% else %}
+  <p class="empty-state">GIF がありません。左のフォームから追加するか、絞り込みを解除してください。</p>
+{% endif %}

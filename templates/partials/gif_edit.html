@@ -1,0 +1,53 @@
+<article class="gif-card gif-card-editing" id="gif-{{ gif.id }}">
+  <form
+    class="edit-form"
+    method="post"
+    action="{{ url_for('edit_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
+    hx-post="{{ url_for('edit_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
+    hx-target="#gif-{{ gif.id }}"
+    hx-swap="outerHTML"
+  >
+    <label class="field">
+      <span>タイトル</span>
+      <input type="text" name="title" value="{{ gif.title or '' }}" maxlength="120">
+    </label>
+    <label class="field">
+      <span>カテゴリ</span>
+      <select name="category_id">
+        <option value="">未分類</option>
+        {% for c in categories %}
+          <option value="{{ c.id }}" {% if gif.category_id == c.id %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <fieldset class="field tag-checkboxes">
+      <legend>タグ</legend>
+      {% for t in tags %}
+        <label class="checkbox-inline">
+          <input
+            type="checkbox"
+            name="tag_ids"
+            value="{{ t.id }}"
+            {% if t.id in selected_tag_ids %}checked{% endif %}
+          >
+          {{ t.name }}
+        </label>
+      {% endfor %}
+    </fieldset>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary btn-small">保存</button>
+      <button
+        type="button"
+        class="btn btn-ghost btn-small"
+        hx-get="{{ url_for('partial_gif_list', category=active_category, tag=active_tags) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+      >キャンセル</button>
+    </div>
+  </form>
+  <img
+    class="gif-image"
+    src="{{ url_for('serve_upload', filename=gif.filename) }}"
+    alt="{{ gif.title or 'GIF' }}"
+  >
+</article>

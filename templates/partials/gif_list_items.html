@@ -1,0 +1,8 @@
+{% for gif in gifs %}
+  {% include "partials/gif_card.html" %}
+{% endfor %}
+{% if has_more %}
+  {% include "partials/gif_load_more.html" %}
+{% elif total > gifs_per_page %}
+  <p class="load-more-done">すべて表示しました（{{ total }} 件）</p>
+{% endif %}

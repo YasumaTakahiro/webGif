@@ -1,0 +1,12 @@
+<div id="filter-panel-body" class="filter-panel-body" hx-swap-oob="innerHTML">
+  {% include "partials/filter_bar.html" %}
+</div>
+<div id="filters-manage-panel" hx-swap-oob="innerHTML">
+  {% include "partials/filters_manage.html" %}
+</div>
+<select id="upload-category-select" name="category_id" hx-swap-oob="true">
+  <option value="">未分類</option>
+  {% for c in categories %}
+    <option value="{{ c.id }}">{{ c.name }}</option>
+  {% endfor %}
+</select>

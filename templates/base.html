@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}webGif{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-row">
+      <div class="header-brand">
+        <h1><a href="{{ url_for('index') }}">webGif</a></h1>
+        <p class="tagline">GIF を縦に並べて閲覧</p>
+      </div>
+      {% block header_actions %}{% endblock %}
+    </div>
+    <p class="server-url">
+      接続先: <strong>{{ request.host_url }}</strong>
+      · 生成: {{ page_loaded_at }}
+      · <a href="{{ url_for('health') }}">接続テスト</a>
+    </p>
+  </header>
+
+  {% block filter_panel %}{% endblock %}
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-messages">
+        {% for category, message in messages %}
+          <p class="flash flash-{{ category }}">{{ message }}</p>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <main class="layout">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,40 @@
+<article class="gif-card" id="gif-{{ gif.id }}">
+  <header class="gif-card-header">
+    <div class="gif-meta">
+      {% if gif.title %}
+        <h2 class="gif-title">{{ gif.title }}</h2>
+      {% endif %}
+      <div class="gif-labels">
+        {% if gif.category_name %}
+          <span class="label label-category">{{ gif.category_name }}</span>
+        {% endif %}
+        {% for tag in gif.tags %}
+          <span class="label label-tag">{{ tag.name }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="gif-actions">
+      <button
+        type="button"
+        class="btn btn-ghost btn-small"
+        hx-get="{{ url_for('edit_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
+        hx-target="#gif-{{ gif.id }}"
+        hx-swap="outerHTML"
+      >編集</button>
+      <button
+        type="button"
+        class="btn btn-danger btn-small"
+        hx-post="{{ url_for('delete_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+        hx-confirm="この GIF を削除しますか？"
+      >削除</button>
+    </div>
+  </header>
+  <img
+    class="gif-image"
+    src="{{ url_for('serve_upload', filename=gif.filename) }}"
+    alt="{{ gif.title or 'GIF' }}"
+    loading="lazy"
+  >
+</article>

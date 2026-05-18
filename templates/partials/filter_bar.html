@@ -1,0 +1,51 @@
+<div class="filter-panel-rows">
+  <div class="filter-panel-row">
+    <span class="filter-panel-label">カテゴリ</span>
+    <div class="chip-row">
+      <button
+        type="button"
+        class="chip {% if not active_category %}chip-active{% endif %}"
+        hx-get="{{ url_for('partial_gif_list', tag=active_tags) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+        hx-push-url="{{ url_for('index', tag=active_tags) if active_tags else url_for('index') }}"
+      >すべて</button>
+      {% for c in categories %}
+        <button
+          type="button"
+          class="chip {% if active_category == c.id %}chip-active{% endif %}"
+          hx-get="{{ url_for('partial_gif_list', category=c.id, tag=active_tags) }}"
+          hx-target="#gif-list"
+          hx-swap="innerHTML"
+          hx-push-url="{{ url_for('index', category=c.id, tag=active_tags) }}"
+        >{{ c.name }} <span class="count">{{ c.gif_count }}</span></button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="filter-panel-row filter-panel-row-tags">
+    <span class="filter-panel-label">タグ</span>
+    <div class="chip-row">
+      <button
+        type="button"
+        class="chip {% if not active_tags %}chip-active{% endif %}"
+        hx-get="{{ url_for('partial_gif_list', category=active_category) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+        hx-push-url="{{ url_for('index', category=active_category) if active_category else url_for('index') }}"
+      >すべて</button>
+      {% for t in tags %}
+        {% set next_tags = active_tags | toggle_tag(t.id) %}
+        <button
+          type="button"
+          class="chip chip-tag {% if t.id in active_tags %}chip-active{% endif %}"
+          hx-get="{{ url_for('partial_gif_list', category=active_category, tag=next_tags) if next_tags else url_for('partial_gif_list', category=active_category) }}"
+          hx-target="#gif-list"
+          hx-swap="innerHTML"
+          hx-push-url="{{ url_for('index', category=active_category, tag=next_tags) if next_tags else (url_for('index', category=active_category) if active_category else url_for('index')) }}"
+        >{{ t.name }} <span class="count">{{ t.gif_count }}</span></button>
+      {% endfor %}
+    </div>
+    <p class="hint filter-tag-hint">複数選択可（選択したタグをすべて持つ GIF）</p>
+  </div>
+</div>
