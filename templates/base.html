@@ -11,15 +11,18 @@
     <div class="header-row">
       <div class="header-brand">
         <h1><a href="{{ url_for('index') }}">webGif</a></h1>
-        <p class="tagline">GIF を縦に並べて閲覧</p>
+        <span class="tagline">GIF を縦に並べて閲覧</span>
       </div>
+      <p class="server-url" title="接続先: {{ request.host_url }} · 生成: {{ page_loaded_at }}">
+        <span class="server-url-label">接続先</span>
+        <strong>{{ request.host_url }}</strong>
+        <span class="server-url-sep">·</span>
+        <span class="server-url-label">生成</span> {{ page_loaded_at }}
+        <span class="server-url-sep">·</span>
+        <a href="{{ url_for('health') }}">接続テスト</a>
+      </p>
       {% block header_actions %}{% endblock %}
     </div>
-    <p class="server-url">
-      接続先: <strong>{{ request.host_url }}</strong>
-      · 生成: {{ page_loaded_at }}
-      · <a href="{{ url_for('health') }}">接続テスト</a>
-    </p>
   </header>
 
   {% block filter_panel %}{% endblock %}
