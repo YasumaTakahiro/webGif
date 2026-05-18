@@ -24,13 +24,14 @@ from werkzeug.utils import secure_filename
 
 import db
 import gif_util
+import media_util
 import webgif_log
 
 BASE_DIR = Path(__file__).parent
 HOST = os.environ.get("WEBGIF_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WEBGIF_PORT", "5055"))
 UPLOAD_DIR = BASE_DIR / "uploads"
-ALLOWED_EXTENSIONS = {"gif"}
+ALLOWED_EXTENSIONS = media_util.ALLOWED_IMAGE_EXTENSIONS
 GIFS_PER_PAGE = 10
 def _max_upload_bytes():
     """MAX_UPLOAD_MB: 上限 MB。0 または未設定で制限なし（ローカル向け）。"""
@@ -171,6 +172,7 @@ def create_app():
             "page_loaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "app_port": PORT,
             "gifs_per_page": GIFS_PER_PAGE,
+            "accept_images": media_util.ACCEPT_UPLOAD_ATTR,
         }
 
     def _gif_list_context(conn, page=1):
@@ -282,13 +284,15 @@ def create_app():
                     else ""
                 )
                 if ext not in ALLOWED_EXTENSIONS:
-                    skipped.append(f"{file.filename}（GIF 以外）")
+                    skipped.append(
+                        f"{file.filename}（{media_util.EXTENSIONS_LABEL} 以外）"
+                    )
                     continue
 
-                stored = f"{uuid.uuid4().hex}.gif"
+                stored = media_util.stored_filename(uuid.uuid4().hex, ext)
                 dest = UPLOAD_DIR / stored
                 file.save(dest)
-                gif_util.ensure_gif_loops(dest)
+                media_util.maybe_fix_gif_loop(dest)
 
                 if single_file and form_title:
                     title = form_title
@@ -307,7 +311,9 @@ def create_app():
         if uploaded == 0:
             detail = "、".join(skipped[:5])
             return _upload_error(
-                f"アップロードできませんでした。{detail}" if detail else "GIF ファイルがありません。"
+                f"アップロードできませんでした。{detail}"
+                if detail
+                else f"対応形式（{media_util.EXTENSIONS_LABEL}）のファイルがありません。"
             )
 
         msg = f"{uploaded} 件をアップロードしました。"
@@ -622,7 +628,11 @@ def create_app():
             abort(404)
         from flask import send_from_directory
 
-        return send_from_directory(UPLOAD_DIR, safe)
+        return send_from_directory(
+            UPLOAD_DIR,
+            safe,
+            mimetype=media_util.mimetype_for_filename(safe),
+        )
 
     return app
 

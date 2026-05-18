@@ -1,4 +1,4 @@
-"""フォルダ内の GIF を uploads にコピーし DB に登録する（Web アップロードより高速）。"""
+"""フォルダ内の画像を uploads にコピーし DB に登録する（Web アップロードより高速）。"""
 
 import argparse
 import shutil
@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 import db
-import gif_util
+import media_util
 
 BASE_DIR = Path(__file__).parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -32,10 +32,8 @@ def _parse_tag_ids(raw: str | None) -> list[int]:
     return ids
 
 
-def _find_gifs(source: Path, recursive: bool) -> list[Path]:
-    pattern = "**/*.gif" if recursive else "*.gif"
-    files = [p for p in source.glob(pattern) if p.is_file()]
-    return sorted(files, key=lambda p: str(p).lower())
+def _find_images(source: Path, recursive: bool) -> list[Path]:
+    return media_util.find_images(source, recursive)
 
 
 def _title_exists(conn, title: str | None) -> bool:
@@ -64,7 +62,7 @@ def import_folder(
         raise FileNotFoundError(f"フォルダが見つかりません: {source}")
 
     tag_ids = tag_ids or []
-    files = _find_gifs(source, recursive)
+    files = _find_images(source, recursive)
     if not files:
         return 0, 0, 0
 
@@ -105,12 +103,18 @@ def import_folder(
                     series_order += 1
                 continue
 
-            stored = f"{uuid.uuid4().hex}.gif"
+            ext = media_util.extension_from_filename(path.name)
+            if ext not in media_util.ALLOWED_IMAGE_EXTENSIONS:
+                print(f"[スキップ] 非対応形式: {path.name}", file=sys.stderr)
+                skipped += 1
+                continue
+
+            stored = media_util.stored_filename(uuid.uuid4().hex, ext)
             dest = UPLOAD_DIR / stored
             try:
                 shutil.copy2(path, dest)
                 if fix_loops:
-                    gif_util.ensure_gif_loops(dest)
+                    media_util.maybe_fix_gif_loop(dest)
             except OSError as e:
                 print(f"[失敗] {path.name}: {e}", file=sys.stderr)
                 failed += 1
@@ -143,12 +147,15 @@ def import_folder(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="フォルダ内の GIF を webGif の uploads / DB に一括登録します。"
+        description=(
+            "フォルダ内の画像（"
+            f"{media_util.EXTENSIONS_LABEL}）を webGif の uploads / DB に一括登録します。"
+        ),
     )
     parser.add_argument(
         "source",
         type=Path,
-        help="GIF が入ったフォルダのパス",
+        help="画像が入ったフォルダのパス",
     )
     parser.add_argument(
         "-r",

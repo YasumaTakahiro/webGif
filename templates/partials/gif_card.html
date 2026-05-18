@@ -33,14 +33,14 @@
         hx-post="{{ url_for('delete_gif', gif_id=gif.id, **gallery_query()) }}"
         hx-target="#gif-list"
         hx-swap="innerHTML"
-        hx-confirm="この GIF を削除しますか？"
+        hx-confirm="この画像を削除しますか？"
       >削除</button>
     </div>
   </header>
   <img
     class="gif-image"
     src="{{ url_for('serve_upload', filename=gif.filename) }}"
-    alt="{{ gif.title or 'GIF' }}"
+    alt="{{ gif.title or '画像' }}"
     loading="lazy"
   >
 </article>

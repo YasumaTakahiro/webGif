@@ -31,9 +31,9 @@
       novalidate
     >
       <label class="field">
-        <span>GIF ファイル（複数選択可）</span>
-        <input type="file" name="files" accept=".gif" multiple>
-        <p class="hint">拡張子 .gif のみ。選べない場合はファイルの種類で「すべてのファイル」を選んでください。</p>
+        <span>画像ファイル（複数選択可）</span>
+        <input type="file" name="files" accept="{{ accept_images }}" multiple>
+        <p class="hint">対応: GIF / PNG / JPEG / WebP。選べない場合は「すべてのファイル」を選んでください。</p>
       </label>
       <label class="field">
         <span>タイトル（任意・1 件のみ）</span>
