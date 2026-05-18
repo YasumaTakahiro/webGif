@@ -55,6 +55,51 @@ def _active_tag_ids():
     return sorted(ids)
 
 
+def _series_only():
+    return request.args.get("series_only", "").lower() in ("1", "true", "yes")
+
+
+def _active_series_id():
+    return request.args.get("series", type=int)
+
+
+def _series_filter_active():
+    return _series_only() or _active_series_id() is not None
+
+
+_UNSET = object()
+
+
+def _gallery_query(
+    category=_UNSET, tag=_UNSET, series_only=_UNSET, series=_UNSET, page=None
+):
+    kw = {}
+    if page is not None:
+        kw["page"] = page
+    series_id = _active_series_id() if series is _UNSET else series
+    if series_id:
+        kw["series"] = series_id
+        return kw
+    use_series_only = _series_only() if series_only is _UNSET else bool(series_only)
+    if use_series_only:
+        kw["series_only"] = 1
+        return kw
+    if category is not _UNSET:
+        if category:
+            kw["category"] = category
+    else:
+        cat = request.args.get("category", type=int)
+        if cat:
+            kw["category"] = cat
+    if tag is not _UNSET:
+        tag_ids = tag
+    else:
+        tag_ids = _active_tag_ids()
+    if tag_ids:
+        kw["tag"] = tag_ids
+    return kw
+
+
 def create_app():
     app = Flask(__name__)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-change-me")
@@ -110,19 +155,38 @@ def create_app():
 
     @app.context_processor
     def inject_globals():
+        series_filter = _series_filter_active()
+        with db.get_db() as conn:
+            series_list = db.fetch_series(conn)
         return {
-            "active_category": request.args.get("category", type=int),
-            "active_tags": _active_tag_ids(),
+            "active_category": None
+            if series_filter
+            else request.args.get("category", type=int),
+            "active_tags": [] if series_filter else _active_tag_ids(),
+            "active_series_only": _series_only() and not _active_series_id(),
+            "active_series_id": _active_series_id(),
+            "series_filter_active": series_filter,
+            "series_list": series_list,
+            "gallery_query": _gallery_query,
             "page_loaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "app_port": PORT,
             "gifs_per_page": GIFS_PER_PAGE,
         }
 
     def _gif_list_context(conn, page=1):
-        category_id = request.args.get("category", type=int)
-        tag_ids = _active_tag_ids()
+        series_id = _active_series_id()
+        series_only = _series_only() and not series_id
+        series_filter = series_id or series_only
+        category_id = None if series_filter else request.args.get("category", type=int)
+        tag_ids = [] if series_filter else _active_tag_ids()
         page = max(1, request.args.get("page", page, type=int))
-        total = db.count_gifs(conn, category_id, tag_ids)
+        total = db.count_gifs(
+            conn,
+            category_id,
+            tag_ids,
+            series_only=series_only,
+            series_id=series_id,
+        )
         offset = (page - 1) * GIFS_PER_PAGE
         gifs = db.fetch_gifs(
             conn,
@@ -130,6 +194,8 @@ def create_app():
             tag_ids=tag_ids,
             limit=GIFS_PER_PAGE,
             offset=offset,
+            series_only=series_only,
+            series_id=series_id,
         )
         loaded = offset + len(gifs)
         return {
@@ -146,11 +212,13 @@ def create_app():
         with db.get_db() as conn:
             categories = db.fetch_categories(conn)
             tags = db.fetch_tags(conn)
+            series_entries = _series_entries(conn)
             list_ctx = _gif_list_context(conn, page=1)
         return render_template(
             "index.html",
             categories=categories,
             tags=tags,
+            series_entries=series_entries,
             **list_ctx,
         )
 
@@ -260,16 +328,21 @@ def create_app():
                 abort(404)
             categories = db.fetch_categories(conn)
             tags = db.fetch_tags(conn)
+            series_list = db.fetch_series(conn)
 
             if request.method == "POST":
                 title = (request.form.get("title") or "").strip() or None
                 category_id = request.form.get("category_id", type=int) or None
                 tag_ids = _parse_tag_ids(request.form)
+                series_id, series_order = _parse_series_fields(
+                    request.form, conn, gif_id
+                )
                 conn.execute(
                     "UPDATE gifs SET title = ?, category_id = ? WHERE id = ?",
                     (title, category_id, gif_id),
                 )
                 db.set_gif_tags(conn, gif_id, tag_ids)
+                db.set_gif_series(conn, gif_id, series_id, series_order)
                 conn.commit()
                 gif = db.get_gif(conn, gif_id)
                 if request.headers.get("HX-Request"):
@@ -285,6 +358,7 @@ def create_app():
             gif=gif,
             categories=categories,
             tags=tags,
+            series_list=series_list,
             selected_tag_ids=selected_tag_ids,
         )
 
@@ -305,8 +379,112 @@ def create_app():
         if request.headers.get("HX-Request"):
             with db.get_db() as conn:
                 list_ctx = _gif_list_context(conn, page=1)
-            return render_template("partials/gif_list.html", **list_ctx)
+                categories = db.fetch_categories(conn)
+                tags = db.fetch_tags(conn)
+            return render_template(
+                "partials/gif_list_refresh.html",
+                categories=categories,
+                tags=tags,
+                **list_ctx,
+            )
         return redirect(url_for("index"))
+
+    @app.route("/gifs/<int:gif_id>/series-shift", methods=["POST"])
+    def shift_gif_series_order(gif_id):
+        direction = request.form.get("direction", "up")
+        with db.get_db() as conn:
+            if not db.swap_series_order(conn, gif_id, direction):
+                flash("並び順を変更できませんでした。", "error")
+            else:
+                conn.commit()
+        if request.headers.get("HX-Request"):
+            with db.get_db() as conn:
+                if request.form.get("refresh_list"):
+                    list_ctx = _gif_list_context(conn, page=1)
+                    categories = db.fetch_categories(conn)
+                    tags = db.fetch_tags(conn)
+                    return render_template(
+                        "partials/gif_list_refresh.html",
+                        categories=categories,
+                        tags=tags,
+                        **list_ctx,
+                    )
+                gif = db.get_gif(conn, gif_id)
+            if gif:
+                return render_template("partials/gif_card.html", gif=gif)
+        return redirect(request.referrer or url_for("index"))
+
+    @app.route("/series", methods=["POST"])
+    def create_series():
+        name = _normalize_name(request.form.get("name"))
+        if not name:
+            return _filters_response()
+        with db.get_db() as conn:
+            sort_order = db.next_series_sort_order(conn)
+            conn.execute(
+                "INSERT OR IGNORE INTO series (name, sort_order) VALUES (?, ?)",
+                (name, sort_order),
+            )
+            conn.commit()
+        return _filters_response()
+
+    @app.route("/series/<int:series_id>/rename", methods=["POST"])
+    def rename_series(series_id):
+        name = _normalize_name(request.form.get("name"))
+        if not name:
+            flash("名称を入力してください。", "error")
+            return _filters_response()
+        with db.get_db() as conn:
+            exists = conn.execute(
+                "SELECT id FROM series WHERE id = ?", (series_id,)
+            ).fetchone()
+            if not exists:
+                abort(404)
+            try:
+                conn.execute(
+                    "UPDATE series SET name = ? WHERE id = ?",
+                    (name, series_id),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                flash(f"「{name}」は既に使われています。", "error")
+        return _filters_response()
+
+    @app.route("/series/<int:series_id>/delete", methods=["POST"])
+    def delete_series(series_id):
+        with db.get_db() as conn:
+            row = conn.execute(
+                "SELECT name FROM series WHERE id = ?", (series_id,)
+            ).fetchone()
+            if not row:
+                abort(404)
+            conn.execute("DELETE FROM series WHERE id = ?", (series_id,))
+            conn.commit()
+        flash(f"シリーズ「{row['name']}」を削除しました。", "success")
+        return _filters_response()
+
+    @app.route("/series/<int:series_id>/save-orders", methods=["POST"])
+    def save_series_orders(series_id):
+        with db.get_db() as conn:
+            exists = conn.execute(
+                "SELECT id FROM series WHERE id = ?", (series_id,)
+            ).fetchone()
+            if not exists:
+                abort(404)
+            for key, val in request.form.items():
+                if not key.startswith("order_"):
+                    continue
+                try:
+                    gif_id = int(key[6:])
+                except ValueError:
+                    continue
+                order = int(val) if str(val).strip() else None
+                conn.execute(
+                    "UPDATE gifs SET series_id = ?, series_order = ? WHERE id = ?",
+                    (series_id, order, gif_id),
+                )
+            conn.commit()
+        return _filters_response()
 
     @app.route("/categories", methods=["POST"])
     def create_category():
@@ -472,15 +650,39 @@ def _parse_tag_ids(form):
     return ids
 
 
+def _parse_series_fields(form, conn, gif_id=None):
+    raw = (form.get("series_id") or "").strip()
+    series_id = int(raw) if raw else None
+    raw_order = (form.get("series_order") or "").strip()
+    series_order = int(raw_order) if raw_order else None
+    if series_id and series_order is None:
+        series_order = db.next_series_order(conn, series_id, gif_id)
+    return series_id, series_order
+
+
+def _series_entries(conn):
+    entries = []
+    for s in db.fetch_series(conn):
+        entries.append(
+            {
+                "series": s,
+                "gifs": db.fetch_series_gifs(conn, s["id"]),
+            }
+        )
+    return entries
+
+
 def _filters_response(redirect_url=None):
     with db.get_db() as conn:
         categories = db.fetch_categories(conn)
         tags = db.fetch_tags(conn)
+        series_entries = _series_entries(conn)
     resp = make_response(
         render_template(
             "partials/filters_oob.html",
             categories=categories,
             tags=tags,
+            series_entries=series_entries,
         )
     )
     if redirect_url:

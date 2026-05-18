@@ -1,5 +1,13 @@
 {% if gifs %}
   {% include "partials/gif_list_items.html" %}
 {% else %}
-  <p class="empty-state">GIF がありません。左のフォームから追加するか、絞り込みを解除してください。</p>
+  <p class="empty-state">
+    {% if active_series_id %}
+      このシリーズに GIF がありません。編集画面から割り当ててください。
+    {% elif active_series_only %}
+      シリーズに所属する GIF がありません。編集画面からシリーズを割り当ててください。
+    {% else %}
+      GIF がありません。左のフォームから追加するか、絞り込みを解除してください。
+    {% endif %}
+  </p>
 {% endif %}

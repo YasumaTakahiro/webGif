@@ -2,8 +2,8 @@
   <form
     class="edit-form"
     method="post"
-    action="{{ url_for('edit_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
-    hx-post="{{ url_for('edit_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
+    action="{{ url_for('edit_gif', gif_id=gif.id, **gallery_query()) }}"
+    hx-post="{{ url_for('edit_gif', gif_id=gif.id, **gallery_query()) }}"
     hx-target="#gif-{{ gif.id }}"
     hx-swap="outerHTML"
   >
@@ -34,12 +34,55 @@
         </label>
       {% endfor %}
     </fieldset>
+    <fieldset class="field series-fields">
+      <legend>シリーズ</legend>
+      <label class="field-inline">
+        <span>シリーズ</span>
+        <select name="series_id">
+          <option value="">なし</option>
+          {% for s in series_list %}
+            <option value="{{ s.id }}" {% if gif.series_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field-inline">
+        <span>並び順</span>
+        <input
+          type="number"
+          name="series_order"
+          value="{{ gif.series_order or '' }}"
+          min="1"
+          step="1"
+          placeholder="1, 2, 3…"
+        >
+      </label>
+      {% if gif.series_id and gif.series_order %}
+        <div class="series-shift-row">
+          <button
+            type="button"
+            class="btn btn-ghost btn-small"
+            hx-post="{{ url_for('shift_gif_series_order', gif_id=gif.id, **gallery_query()) }}"
+            hx-vals='{"direction": "up", "refresh_list": "1"}'
+            hx-target="#gif-list"
+            hx-swap="innerHTML"
+          >↑ 前へ</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-small"
+            hx-post="{{ url_for('shift_gif_series_order', gif_id=gif.id, **gallery_query()) }}"
+            hx-vals='{"direction": "down", "refresh_list": "1"}'
+            hx-target="#gif-list"
+            hx-swap="innerHTML"
+          >↓ 後へ</button>
+        </div>
+      {% endif %}
+    </fieldset>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary btn-small">保存</button>
       <button
         type="button"
         class="btn btn-ghost btn-small"
-        hx-get="{{ url_for('partial_gif_list', category=active_category, tag=active_tags) }}"
+        hx-get="{{ url_for('partial_gif_list', **gallery_query()) }}"
         hx-target="#gif-list"
         hx-swap="innerHTML"
       >キャンセル</button>

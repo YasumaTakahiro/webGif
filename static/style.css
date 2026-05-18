@@ -174,9 +174,20 @@ a {
   width: 100%;
 }
 
-.filter-tag-hint {
+.filter-tag-hint,
+.filter-mode-hint {
   margin: 0.15rem 0 0 3.85rem;
   font-size: 0.72rem;
+}
+
+.filter-panel-row-muted {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.filter-panel-series-only .filter-panel-row-series {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .form-action-hint code,
@@ -402,6 +413,11 @@ a {
   color: var(--tag-text);
 }
 
+.chip-series.chip-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .chip .count {
   opacity: 0.65;
   font-size: 0.75em;
@@ -508,6 +524,77 @@ a {
 .label-tag {
   background: var(--tag);
   color: var(--tag-text);
+}
+
+.label-series {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+.manage-box-series {
+  margin-top: 1.25rem;
+}
+
+.series-block {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.series-order-list {
+  margin: 0.5rem 0 0.65rem;
+  padding-left: 1.25rem;
+}
+
+.series-order-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.series-order-input {
+  width: 3.5rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.series-order-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.series-fields .field-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.series-fields .field-inline input,
+.series-fields .field-inline select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.series-shift-row {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
 }
 
 .gif-actions {

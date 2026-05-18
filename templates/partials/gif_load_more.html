@@ -1,7 +1,7 @@
 <div
   id="gif-load-more"
   class="load-more-sentinel"
-  hx-get="{{ url_for('partial_gif_list', page=next_page, category=active_category, tag=active_tags) }}"
+  hx-get="{{ url_for('partial_gif_list', **gallery_query(page=next_page)) }}"
   hx-trigger="intersect once root:#gallery"
   hx-swap="outerHTML"
 >

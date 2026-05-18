@@ -1,0 +1,68 @@
+<section class="manage-box manage-box-series" id="manage-series">
+  <h2>シリーズ</h2>
+  <p class="hint">
+    同じシリーズの GIF は、タグ絞り込み時もまとめて表示され、番号順に並びます。
+    各 GIF の「編集」からシリーズを割り当てられます。
+  </p>
+
+  <form class="inline-form" hx-post="{{ url_for('create_series') }}" hx-swap="none">
+    <input type="text" name="name" placeholder="新しいシリーズ" maxlength="64" required>
+    <button type="submit" class="btn btn-small">追加</button>
+  </form>
+
+  {% if series_entries %}
+    {% for entry in series_entries %}
+      {% set s = entry.series %}
+      <div class="series-block">
+        <form
+          class="inline-form meta-rename-form"
+          hx-post="{{ url_for('rename_series', series_id=s.id) }}"
+          hx-swap="none"
+        >
+          <input type="text" name="name" value="{{ s.name }}" maxlength="64" required aria-label="シリーズ名">
+          <button type="submit" class="btn btn-small">保存</button>
+          <button
+            type="button"
+            class="btn btn-danger btn-small"
+            hx-post="{{ url_for('delete_series', series_id=s.id) }}"
+            hx-swap="none"
+            hx-confirm="シリーズ「{{ s.name }}」を削除しますか？（GIF はシリーズ未所属になります）"
+          >削除</button>
+        </form>
+
+        {% if entry.gifs %}
+          <form
+            class="series-order-form"
+            hx-post="{{ url_for('save_series_orders', series_id=s.id) }}"
+            hx-swap="none"
+          >
+            <ol class="series-order-list">
+              {% for g in entry.gifs %}
+                <li>
+                  <label class="series-order-item">
+                    <span class="series-order-label">#</span>
+                    <input
+                      type="number"
+                      name="order_{{ g.id }}"
+                      value="{{ g.series_order or '' }}"
+                      min="1"
+                      step="1"
+                      class="series-order-input"
+                      aria-label="並び順"
+                    >
+                    <span class="series-order-title">{{ g.title or g.filename }}</span>
+                  </label>
+                </li>
+              {% endfor %}
+            </ol>
+            <button type="submit" class="btn btn-small">並び順を保存</button>
+          </form>
+        {% else %}
+          <p class="hint">メンバーがまだありません。</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="hint">シリーズがまだありません。</p>
+  {% endif %}
+</section>

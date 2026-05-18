@@ -5,6 +5,12 @@
         <h2 class="gif-title">{{ gif.title }}</h2>
       {% endif %}
       <div class="gif-labels">
+        {% if gif.series_name %}
+          <span class="label label-series">
+            {{ gif.series_name }}
+            {% if gif.series_order %}#{{ gif.series_order }}{% endif %}
+          </span>
+        {% endif %}
         {% if gif.category_name %}
           <span class="label label-category">{{ gif.category_name }}</span>
         {% endif %}
@@ -17,14 +23,14 @@
       <button
         type="button"
         class="btn btn-ghost btn-small"
-        hx-get="{{ url_for('edit_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
+        hx-get="{{ url_for('edit_gif', gif_id=gif.id, **gallery_query()) }}"
         hx-target="#gif-{{ gif.id }}"
         hx-swap="outerHTML"
       >編集</button>
       <button
         type="button"
         class="btn btn-danger btn-small"
-        hx-post="{{ url_for('delete_gif', gif_id=gif.id, category=active_category, tag=active_tags) }}"
+        hx-post="{{ url_for('delete_gif', gif_id=gif.id, **gallery_query()) }}"
         hx-target="#gif-list"
         hx-swap="innerHTML"
         hx-confirm="この GIF を削除しますか？"

@@ -11,6 +11,27 @@ def get_db():
     return conn
 
 
+def _migrate(conn):
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS series (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(gifs)").fetchall()}
+    if "series_id" not in cols:
+        conn.execute(
+            "ALTER TABLE gifs ADD COLUMN series_id INTEGER "
+            "REFERENCES series(id) ON DELETE SET NULL"
+        )
+    if "series_order" not in cols:
+        conn.execute("ALTER TABLE gifs ADD COLUMN series_order INTEGER")
+
+
 def init_db():
     with get_db() as conn:
         conn.executescript(
@@ -42,6 +63,7 @@ def init_db():
             );
             """
         )
+        _migrate(conn)
 
 
 def fetch_categories(conn):
@@ -64,6 +86,33 @@ def fetch_tags(conn):
     ).fetchall()
 
 
+def fetch_series(conn):
+    return conn.execute(
+        "SELECT s.*, COUNT(g.id) AS gif_count "
+        "FROM series s "
+        "LEFT JOIN gifs g ON g.series_id = s.id "
+        "GROUP BY s.id "
+        "ORDER BY s.sort_order, s.name"
+    ).fetchall()
+
+
+def fetch_series_gifs(conn, series_id):
+    return conn.execute(
+        "SELECT g.id, g.title, g.filename, g.series_order "
+        "FROM gifs g "
+        "WHERE g.series_id = ? "
+        "ORDER BY "
+        "CASE WHEN g.series_order IS NULL THEN 1 ELSE 0 END, "
+        "g.series_order, g.id",
+        (series_id,),
+    ).fetchall()
+
+
+def next_series_sort_order(conn):
+    row = conn.execute("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM series").fetchone()
+    return row["n"] if row else 0
+
+
 def _gif_filter_sql(category_id=None, tag_ids=None):
     sql = " WHERE 1=1"
     params = []
@@ -76,61 +125,151 @@ def _gif_filter_sql(category_id=None, tag_ids=None):
     return sql, params
 
 
-def count_gifs(conn, category_id=None, tag_ids=None):
-    where, params = _gif_filter_sql(category_id, tag_ids)
-    row = conn.execute(
-        f"SELECT COUNT(*) AS n FROM gifs g{where}",
-        params,
-    ).fetchone()
-    return row["n"] if row else 0
-
-
-def fetch_gifs(conn, category_id=None, tag_ids=None, limit=None, offset=0):
-    where, params = _gif_filter_sql(category_id, tag_ids)
-    sql = (
-        "SELECT g.*, c.name AS category_name "
+def _gif_select_sql():
+    return (
+        "SELECT g.*, c.name AS category_name, "
+        "s.name AS series_name, s.sort_order AS series_sort_order "
         "FROM gifs g "
         "LEFT JOIN categories c ON c.id = g.category_id "
-        f"{where}"
+        "LEFT JOIN series s ON s.id = g.series_id "
     )
-    sql += " ORDER BY g.created_at DESC, g.id DESC"
-    if limit is not None:
-        sql += " LIMIT ? OFFSET ?"
-        params = [*params, limit, offset]
-    rows = conn.execute(sql, params).fetchall()
 
-    gif_ids = [r["id"] for r in rows]
+
+def _sort_gallery_rows(rows):
+    series_rows = [r for r in rows if r["series_id"]]
+    other_rows = [r for r in rows if not r["series_id"]]
+    series_rows.sort(
+        key=lambda r: (
+            r["series_sort_order"] or 0,
+            r["series_order"] if r["series_order"] is not None else 1_000_000,
+            r["id"],
+        )
+    )
+    other_rows.sort(key=lambda r: (r["created_at"], r["id"]), reverse=True)
+    return list(series_rows) + list(other_rows)
+
+
+def _attach_tags(conn, gifs):
+    if not gifs:
+        return []
+    gif_ids = [g["id"] for g in gifs]
+    placeholders = ",".join("?" * len(gif_ids))
+    tag_rows = conn.execute(
+        f"SELECT gt.gif_id, t.id, t.name "
+        f"FROM gif_tags gt "
+        f"JOIN tags t ON t.id = gt.tag_id "
+        f"WHERE gt.gif_id IN ({placeholders}) "
+        f"ORDER BY t.name",
+        gif_ids,
+    ).fetchall()
     tags_by_gif = {}
-    if gif_ids:
-        placeholders = ",".join("?" * len(gif_ids))
-        tag_rows = conn.execute(
-            f"SELECT gt.gif_id, t.id, t.name "
-            f"FROM gif_tags gt "
-            f"JOIN tags t ON t.id = gt.tag_id "
-            f"WHERE gt.gif_id IN ({placeholders}) "
-            f"ORDER BY t.name",
-            gif_ids,
-        ).fetchall()
-        for tr in tag_rows:
-            tags_by_gif.setdefault(tr["gif_id"], []).append(
-                {"id": tr["id"], "name": tr["name"]}
-            )
-
+    for tr in tag_rows:
+        tags_by_gif.setdefault(tr["gif_id"], []).append(
+            {"id": tr["id"], "name": tr["name"]}
+        )
     return [
-        {
-            **dict(row),
-            "tags": tags_by_gif.get(row["id"], []),
-        }
-        for row in rows
+        {**gif, "tags": tags_by_gif.get(gif["id"], [])}
+        for gif in gifs
     ]
+
+
+def _rows_to_gifs(rows):
+    return [dict(row) for row in rows]
+
+
+def fetch_gifs_for_gallery(
+    conn, category_id=None, tag_ids=None, series_only=False, series_id=None
+):
+    if series_id:
+        rows = conn.execute(
+            f"{_gif_select_sql()} WHERE g.series_id = ?",
+            (series_id,),
+        ).fetchall()
+        rows.sort(
+            key=lambda r: (
+                r["series_order"] if r["series_order"] is not None else 1_000_000,
+                r["id"],
+            )
+        )
+        return _attach_tags(conn, _rows_to_gifs(rows))
+
+    if series_only:
+        rows = conn.execute(
+            f"{_gif_select_sql()} WHERE g.series_id IS NOT NULL"
+        ).fetchall()
+        sorted_rows = _sort_gallery_rows(rows)
+        return _attach_tags(conn, _rows_to_gifs(sorted_rows))
+
+    where, params = _gif_filter_sql(category_id, tag_ids)
+    matched = conn.execute(
+        f"SELECT g.id, g.series_id FROM gifs g{where}",
+        params,
+    ).fetchall()
+
+    final_ids = {r["id"] for r in matched}
+    series_ids = {r["series_id"] for r in matched if r["series_id"]}
+
+    if series_ids:
+        placeholders = ",".join("?" * len(series_ids))
+        expand_sql = f"SELECT id FROM gifs WHERE series_id IN ({placeholders})"
+        expand_params = list(series_ids)
+        if category_id:
+            expand_sql += " AND category_id = ?"
+            expand_params.append(category_id)
+        for row in conn.execute(expand_sql, expand_params):
+            final_ids.add(row["id"])
+
+    if not final_ids:
+        return []
+
+    placeholders = ",".join("?" * len(final_ids))
+    rows = conn.execute(
+        f"{_gif_select_sql()} WHERE g.id IN ({placeholders})",
+        list(final_ids),
+    ).fetchall()
+    sorted_rows = _sort_gallery_rows(rows)
+    return _attach_tags(conn, _rows_to_gifs(sorted_rows))
+
+
+def count_gifs(
+    conn, category_id=None, tag_ids=None, series_only=False, series_id=None
+):
+    return len(
+        fetch_gifs_for_gallery(
+            conn,
+            category_id,
+            tag_ids,
+            series_only=series_only,
+            series_id=series_id,
+        )
+    )
+
+
+def fetch_gifs(
+    conn,
+    category_id=None,
+    tag_ids=None,
+    limit=None,
+    offset=0,
+    series_only=False,
+    series_id=None,
+):
+    all_gifs = fetch_gifs_for_gallery(
+        conn,
+        category_id,
+        tag_ids,
+        series_only=series_only,
+        series_id=series_id,
+    )
+    if limit is None:
+        return all_gifs
+    start = offset or 0
+    return all_gifs[start : start + limit]
 
 
 def get_gif(conn, gif_id):
     row = conn.execute(
-        "SELECT g.*, c.name AS category_name "
-        "FROM gifs g "
-        "LEFT JOIN categories c ON c.id = g.category_id "
-        "WHERE g.id = ?",
+        f"{_gif_select_sql()} WHERE g.id = ?",
         (gif_id,),
     ).fetchone()
     if not row:
@@ -151,3 +290,66 @@ def set_gif_tags(conn, gif_id, tag_ids):
             "INSERT OR IGNORE INTO gif_tags (gif_id, tag_id) VALUES (?, ?)",
             (gif_id, tag_id),
         )
+
+
+def set_gif_series(conn, gif_id, series_id, series_order):
+    if series_id:
+        conn.execute(
+            "UPDATE gifs SET series_id = ?, series_order = ? WHERE id = ?",
+            (series_id, series_order, gif_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE gifs SET series_id = NULL, series_order = NULL WHERE id = ?",
+            (gif_id,),
+        )
+
+
+def next_series_order(conn, series_id, exclude_gif_id=None):
+    sql = (
+        "SELECT COALESCE(MAX(series_order), 0) + 1 AS n FROM gifs "
+        "WHERE series_id = ?"
+    )
+    params = [series_id]
+    if exclude_gif_id:
+        sql += " AND id != ?"
+        params.append(exclude_gif_id)
+    row = conn.execute(sql, params).fetchone()
+    return row["n"] if row else 1
+
+
+def swap_series_order(conn, gif_id, direction):
+    gif = conn.execute(
+        "SELECT id, series_id, series_order FROM gifs WHERE id = ?",
+        (gif_id,),
+    ).fetchone()
+    if not gif or not gif["series_id"] or gif["series_order"] is None:
+        return False
+
+    siblings = conn.execute(
+        "SELECT id, series_order FROM gifs "
+        "WHERE series_id = ? AND series_order IS NOT NULL "
+        "ORDER BY series_order, id",
+        (gif["series_id"],),
+    ).fetchall()
+    ids = [s["id"] for s in siblings]
+    if gif_id not in ids:
+        return False
+    idx = ids.index(gif_id)
+    if direction == "up" and idx > 0:
+        other_id = ids[idx - 1]
+    elif direction == "down" and idx < len(ids) - 1:
+        other_id = ids[idx + 1]
+    else:
+        return False
+
+    other = next(s for s in siblings if s["id"] == other_id)
+    conn.execute(
+        "UPDATE gifs SET series_order = ? WHERE id = ?",
+        (other["series_order"], gif_id),
+    )
+    conn.execute(
+        "UPDATE gifs SET series_order = ? WHERE id = ?",
+        (gif["series_order"], other_id),
+    )
+    return True
