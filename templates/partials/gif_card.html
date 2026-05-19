@@ -1,9 +1,12 @@
 <article class="gif-card" id="gif-{{ gif.id }}">
   <header class="gif-card-header">
     <div class="gif-meta">
-      {% if gif.title %}
-        <h2 class="gif-title">{{ gif.title }}</h2>
-      {% endif %}
+      <h2 class="gif-title">
+        {% if gif.title %}
+          <span class="gif-title-text">{{ gif.title }}</span>
+        {% endif %}
+        <span class="gif-filename">{{ gif.filename }}</span>
+      </h2>
       <div class="gif-labels">
         {% if gif.series_name %}
           <span class="label label-series">

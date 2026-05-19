@@ -1,7 +1,16 @@
 import sqlite3
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 DB_PATH = Path(__file__).parent / "webgif.db"
+JST = ZoneInfo("Asia/Tokyo")
+_CREATED_AT_SQL = "datetime('now', 'localtime')"
+
+
+def now_jst() -> str:
+    """DB 保存用の JST タイムスタンプ（YYYY-MM-DD HH:MM:SS）。"""
+    return datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def get_db():
@@ -13,15 +22,16 @@ def get_db():
 
 def _migrate(conn):
     conn.executescript(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS series (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             sort_order INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT ({_CREATED_AT_SQL})
         );
         """
     )
+    _migrate_created_at_to_jst(conn)
     cols = {row[1] for row in conn.execute("PRAGMA table_info(gifs)").fetchall()}
     if "series_id" not in cols:
         conn.execute(
@@ -32,20 +42,44 @@ def _migrate(conn):
         conn.execute("ALTER TABLE gifs ADD COLUMN series_order INTEGER")
 
 
+def _migrate_created_at_to_jst(conn):
+    """旧データの UTC created_at を JST に直す（1 回だけ）。"""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS _schema_migrations (name TEXT PRIMARY KEY)"
+    )
+    if conn.execute(
+        "SELECT 1 FROM _schema_migrations WHERE name = 'created_at_jst'"
+    ).fetchone():
+        return
+    for table in ("gifs", "categories", "tags", "series"):
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table,),
+        ).fetchone():
+            continue
+        conn.execute(
+            f"UPDATE {table} SET created_at = datetime(created_at, '+9 hours') "
+            f"WHERE created_at IS NOT NULL"
+        )
+    conn.execute(
+        "INSERT INTO _schema_migrations (name) VALUES ('created_at_jst')"
+    )
+
+
 def init_db():
     with get_db() as conn:
         conn.executescript(
-            """
+            f"""
             CREATE TABLE IF NOT EXISTS categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TEXT NOT NULL DEFAULT ({_CREATED_AT_SQL})
             );
 
             CREATE TABLE IF NOT EXISTS tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TEXT NOT NULL DEFAULT ({_CREATED_AT_SQL})
             );
 
             CREATE TABLE IF NOT EXISTS gifs (
@@ -53,7 +87,7 @@ def init_db():
                 filename TEXT NOT NULL,
                 title TEXT,
                 category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TEXT NOT NULL DEFAULT ({_CREATED_AT_SQL})
             );
 
             CREATE TABLE IF NOT EXISTS gif_tags (
@@ -135,18 +169,37 @@ def _gif_select_sql():
     )
 
 
-def _sort_gallery_rows(rows):
-    series_rows = [r for r in rows if r["series_id"]]
-    other_rows = [r for r in rows if not r["series_id"]]
-    series_rows.sort(
+def _sort_series_group(group):
+    group.sort(
         key=lambda r: (
-            r["series_sort_order"] or 0,
             r["series_order"] if r["series_order"] is not None else 1_000_000,
             r["id"],
         )
     )
-    other_rows.sort(key=lambda r: (r["created_at"], r["id"]), reverse=True)
-    return list(series_rows) + list(other_rows)
+    return group
+
+
+def _sort_gallery_rows(rows):
+    """全体は ID 昇順。シリーズは先頭話の ID の位置にまとめて並べる。"""
+    by_series = {}
+    slots = []
+    for row in rows:
+        series_id = row["series_id"]
+        if series_id:
+            by_series.setdefault(series_id, []).append(row)
+        else:
+            slots.append((row["id"], [row]))
+
+    for group in by_series.values():
+        group = _sort_series_group(group)
+        anchor_id = min(r["id"] for r in group)
+        slots.append((anchor_id, group))
+
+    slots.sort(key=lambda slot: slot[0])
+    result = []
+    for _, items in slots:
+        result.extend(items)
+    return result
 
 
 def _attach_tags(conn, gifs):

@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "webGif: run server",
+      "type": "shell",
+      "command": "/opt/venv/bin/python",
+      "args": ["-u", "app.py"],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "MAX_UPLOAD_MB": "0",
+          "WEBGIF_HOST": "0.0.0.0",
+          "WEBGIF_PORT": "5055",
+          "PYTHONUNBUFFERED": "1"
+        }
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "webgif",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^ \\* Serving Flask app",
+          "endsPattern": "^ \\* Running on "
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "webgif-server"
+      }
+    },
+    {
+      "label": "webGif: stop server",
+      "type": "shell",
+      "command": "bash",
+      "args": [".devcontainer/stop-server.sh"],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "WEBGIF_PORT": "5055"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "showReuseMessage": false
+      }
+    },
+    {
+      "label": "webGif: restart server",
+      "dependsOn": ["webGif: stop server", "webGif: run server"],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
+}

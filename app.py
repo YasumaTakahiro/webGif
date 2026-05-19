@@ -2,11 +2,9 @@ import logging
 import os
 import re
 import socket
+import time
 import sqlite3
 import sys
-import threading
-import uuid
-from datetime import datetime
 from pathlib import Path
 
 from flask import (
@@ -20,10 +18,7 @@ from flask import (
     url_for,
 )
 from werkzeug.exceptions import RequestEntityTooLarge
-from werkzeug.utils import secure_filename
-
 import db
-import gif_util
 import media_util
 import webgif_log
 
@@ -110,20 +105,11 @@ def create_app():
 
     db.init_db()
 
-    def _fix_gifs_background():
-        count = gif_util.fix_all_upload_gifs(UPLOAD_DIR)
-        if count:
-            webgif_log.log(f"GIF loop fix: {count} file(s) updated")
-
-    threading.Thread(target=_fix_gifs_background, daemon=True).start()
-
     @app.before_request
     def log_request():
         if request.path.startswith("/static"):
             return
         webgif_log.log(f"{request.method} {request.path}")
-        if request.method == "POST" and request.path == "/gifs/upload":
-            webgif_log.log("upload: ファイル受信完了・保存開始")
 
     @app.route("/health")
     def health():
@@ -136,7 +122,7 @@ def create_app():
         if limit:
             flash(
                 f"合計サイズが上限（{limit // (1024 * 1024)} MB）を超えました。"
-                "枚数を減らすか、run.bat 実行前に set MAX_UPLOAD_MB=0 で制限なしにできます。",
+                "枚数を減らすか、MAX_UPLOAD_MB=0 で制限なしにできます。",
                 "error",
             )
         else:
@@ -169,7 +155,7 @@ def create_app():
             "series_filter_active": series_filter,
             "series_list": series_list,
             "gallery_query": _gallery_query,
-            "page_loaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "page_loaded_at": db.now_jst(),
             "app_port": PORT,
             "gifs_per_page": GIFS_PER_PAGE,
             "accept_images": media_util.ACCEPT_UPLOAD_ATTR,
@@ -275,6 +261,7 @@ def create_app():
 
         uploaded = 0
         skipped = []
+        reserved_names: set[str] = set()
 
         with db.get_db() as conn:
             for file in files:
@@ -289,10 +276,23 @@ def create_app():
                     )
                     continue
 
-                stored = media_util.stored_filename(uuid.uuid4().hex, ext)
+                stored = media_util.allocate_stored_filename(
+                    file.filename,
+                    UPLOAD_DIR,
+                    conn,
+                    reserved=reserved_names,
+                )
                 dest = UPLOAD_DIR / stored
-                file.save(dest)
-                media_util.maybe_fix_gif_loop(dest)
+                t0 = time.monotonic()
+                try:
+                    media_util.save_upload_file(file, dest)
+                except OSError as exc:
+                    webgif_log.log(f"upload save failed: {file.filename} ({exc})")
+                    skipped.append(f"{file.filename}（保存失敗）")
+                    continue
+                webgif_log.log(
+                    f"upload saved: {stored} ({time.monotonic() - t0:.1f}s)"
+                )
 
                 if single_file and form_title:
                     title = form_title
@@ -300,8 +300,9 @@ def create_app():
                     title = _title_from_filename(file.filename)
 
                 cur = conn.execute(
-                    "INSERT INTO gifs (filename, title, category_id) VALUES (?, ?, ?)",
-                    (stored, title, category_id),
+                    "INSERT INTO gifs (filename, title, category_id, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (stored, title, category_id, db.now_jst()),
                 )
                 db.set_gif_tags(conn, cur.lastrowid, tag_ids)
                 uploaded += 1
@@ -428,8 +429,9 @@ def create_app():
         with db.get_db() as conn:
             sort_order = db.next_series_sort_order(conn)
             conn.execute(
-                "INSERT OR IGNORE INTO series (name, sort_order) VALUES (?, ?)",
-                (name, sort_order),
+                "INSERT OR IGNORE INTO series (name, sort_order, created_at) "
+                "VALUES (?, ?, ?)",
+                (name, sort_order, db.now_jst()),
             )
             conn.commit()
         return _filters_response()
@@ -499,7 +501,8 @@ def create_app():
             return _filters_response()
         with db.get_db() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO categories (name) VALUES (?)", (name,)
+                "INSERT OR IGNORE INTO categories (name, created_at) VALUES (?, ?)",
+                (name, db.now_jst()),
             )
             conn.commit()
         return _filters_response()
@@ -510,7 +513,10 @@ def create_app():
         if not name:
             return _filters_response()
         with db.get_db() as conn:
-            conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (name,))
+            conn.execute(
+                "INSERT OR IGNORE INTO tags (name, created_at) VALUES (?, ?)",
+                (name, db.now_jst()),
+            )
             conn.commit()
         return _filters_response()
 
@@ -620,18 +626,21 @@ def create_app():
 
     @app.route("/uploads/<path:filename>")
     def serve_upload(filename):
-        safe = secure_filename(filename)
-        if safe != filename:
+        if not media_util.is_safe_stored_filename(filename):
             abort(404)
-        path = UPLOAD_DIR / safe
-        if not path.exists():
+        path = (UPLOAD_DIR / filename).resolve()
+        try:
+            path.relative_to(UPLOAD_DIR.resolve())
+        except ValueError:
+            abort(404)
+        if not path.is_file():
             abort(404)
         from flask import send_from_directory
 
         return send_from_directory(
             UPLOAD_DIR,
-            safe,
-            mimetype=media_util.mimetype_for_filename(safe),
+            filename,
+            mimetype=media_util.mimetype_for_filename(filename),
         )
 
     return app
@@ -743,7 +752,7 @@ if __name__ == "__main__":
     if not _port_available(HOST, PORT):
         webgif_log.log(
             f"ERROR: ポート {PORT} は使用中です。"
-            " 別の run.ps1 を止めるか WEBGIF_PORT=5056 を指定してください。"
+            " 別プロセスを止めるか WEBGIF_PORT=5056 を指定してください。"
         )
         sys.exit(1)
 

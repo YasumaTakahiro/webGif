@@ -3,7 +3,6 @@
 import argparse
 import shutil
 import sys
-import uuid
 from pathlib import Path
 
 import db
@@ -54,7 +53,6 @@ def import_folder(
     series_id: int | None = None,
     series_order_start: int | None = None,
     skip_duplicates: bool = False,
-    fix_loops: bool = True,
     dry_run: bool = False,
 ) -> tuple[int, int, int]:
     source = source.resolve()
@@ -73,6 +71,7 @@ def import_folder(
     skipped = 0
     failed = 0
     series_order = series_order_start
+    reserved_names: set[str] = set()
 
     with db.get_db() as conn:
         if series_id:
@@ -109,12 +108,15 @@ def import_folder(
                 skipped += 1
                 continue
 
-            stored = media_util.stored_filename(uuid.uuid4().hex, ext)
+            stored = media_util.allocate_stored_filename(
+                path.name,
+                UPLOAD_DIR,
+                conn,
+                reserved=reserved_names,
+            )
             dest = UPLOAD_DIR / stored
             try:
                 shutil.copy2(path, dest)
-                if fix_loops:
-                    media_util.maybe_fix_gif_loop(dest)
             except OSError as e:
                 print(f"[失敗] {path.name}: {e}", file=sys.stderr)
                 failed += 1
@@ -131,9 +133,10 @@ def import_folder(
                     series_order += 1
 
             cur = conn.execute(
-                "INSERT INTO gifs (filename, title, category_id, series_id, series_order) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (stored, title, category_id, series_id, order),
+                "INSERT INTO gifs "
+                "(filename, title, category_id, series_id, series_order, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (stored, title, category_id, series_id, order, db.now_jst()),
             )
             db.set_gif_tags(conn, cur.lastrowid, tag_ids)
             imported += 1
@@ -193,11 +196,6 @@ def main(argv: list[str] | None = None) -> int:
         help="ファイル名と同じタイトルが既にあればスキップ",
     )
     parser.add_argument(
-        "--no-loop-fix",
-        action="store_true",
-        help="ループ補正をスキップ（起動時の一括補正に任せる）",
-    )
-    parser.add_argument(
         "-n",
         "--dry-run",
         action="store_true",
@@ -214,7 +212,6 @@ def main(argv: list[str] | None = None) -> int:
             series_id=args.series_id,
             series_order_start=args.series_order_start,
             skip_duplicates=args.skip_duplicates,
-            fix_loops=not args.no_loop_fix,
             dry_run=args.dry_run,
         )
     except (FileNotFoundError, ValueError) as e:

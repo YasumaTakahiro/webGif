@@ -1,0 +1,53 @@
+{
+  "name": "webGif",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "remoteUser": "vscode",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy",
+        "GitHub.vscode-pull-request-github"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.terminal.activateEnvironment": false,
+        "github.gitAuthentication": true,
+        "git.terminalAuthentication": true,
+        "git.useIntegratedAskPass": true
+      }
+    }
+  },
+  "forwardPorts": [5055],
+  "portsAttributes": {
+    "5055": {
+      "label": "webGif",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "pip install -r requirements.txt && sed -i 's/\\r$//' .devcontainer/*.sh && chmod +x .devcontainer/*.sh && bash .devcontainer/post-start.sh",
+  "postStartCommand": "bash .devcontainer/post-start.sh",
+  "remoteEnv": {
+    "VIRTUAL_ENV": "/opt/venv",
+    "PATH": "/opt/venv/bin:${containerEnv:PATH}"
+  },
+  "containerEnv": {
+    "HISTFILE": "/commandhistory/.bash_history",
+    "WEBGIF_HOST": "0.0.0.0",
+    "WEBGIF_PORT": "5055",
+    "WEBGIF_UPLOAD_TMP": "/tmp/webgif-uploads",
+    "PYTHONUNBUFFERED": "1",
+    "TZ": "Asia/Tokyo"
+  },
+  "mounts": [
+    "source=webgif-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/vscode/.ssh,readonly,type=bind,consistency=cached,optional",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/vscode/.host-gitconfig,readonly,type=bind,consistency=cached,optional"
+  ]
+}

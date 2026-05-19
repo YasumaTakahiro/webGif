@@ -1,0 +1,32 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - .:/workspace:cached
+      - pip-cache:/home/vscode/.cache/pip
+    ports:
+      - "${WEBGIF_PORT:-5055}:5055"
+    environment:
+      WEBGIF_HOST: "0.0.0.0"
+      WEBGIF_PORT: "5055"
+      WEBGIF_UPLOAD_TMP: "/tmp/webgif-uploads"
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Tokyo
+      VIRTUAL_ENV: /opt/venv
+      PATH: /opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      HISTFILE: /commandhistory/.bash_history
+    command: sleep infinity
+    # 将来のサービス例:
+    # depends_on:
+    #   - redis
+
+  # redis:
+  #   image: redis:7-alpine
+  #   volumes:
+  #     - redis-data:/data
+
+volumes:
+  pip-cache:
+  # redis-data:

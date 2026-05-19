@@ -61,11 +61,12 @@
           <p class="hint">管理パネルで先にタグを作れます。</p>
         {% endif %}
       </fieldset>
-      <button type="submit" class="btn btn-primary">追加（通常のフォーム送信）</button>
+      <button type="submit" class="btn btn-primary">追加</button>
     </form>
+    <p class="upload-waiting" id="upload-waiting" hidden></p>
     <p class="hint upload-note">
-      「追加」後、タブが読み込み中になれば送信開始です。大きい GIF は数分かかります。<br>
-      ログは <code>webgif.log</code> にも記録されます（PowerShell に出ない場合用）。
+      送信が始まるとブラウザのタブが読み込み中になります。Dev Container では大きい GIF で数分かかることがあります。<br>
+      進捗は <code>webgif.log</code> の <code>upload saved:</code> でも確認できます。
     </p>
   </section>
 
@@ -85,4 +86,5 @@
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
 <script src="{{ url_for('static', filename='sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='filter_panel.js') }}"></script>
+<script src="{{ url_for('static', filename='upload.js') }}"></script>
 {% endblock %}

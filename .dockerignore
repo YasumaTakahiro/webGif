@@ -1,0 +1,10 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.git/
+uploads/*
+!uploads/.gitkeep
+*.db
+webgif.log
+.env
