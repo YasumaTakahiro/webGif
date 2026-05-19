@@ -1,11 +1,15 @@
 (function () {
-  const form = document.querySelector(".upload-form");
+  const form =
+    document.querySelector(".upload-form") ||
+    document.querySelector(".upload-resolve-form");
   if (!form) return;
 
   const input = form.querySelector('input[type="file"]');
   const waiting = document.getElementById("upload-waiting");
+  const waitingText = document.getElementById("upload-waiting-text");
   const submit = form.querySelector('button[type="submit"]');
   const defaultLabel = submit ? submit.textContent : "";
+  const isResolve = form.classList.contains("upload-resolve-form");
   let submitting = false;
 
   function hasFiles() {
@@ -14,14 +18,20 @@
 
   function updateSubmitState() {
     if (!submit || submitting) return;
+    if (isResolve) {
+      submit.disabled = false;
+      return;
+    }
     submit.disabled = !hasFiles();
   }
 
-  input?.addEventListener("change", updateSubmitState);
+  if (!isResolve) {
+    input?.addEventListener("change", updateSubmitState);
+  }
 
   form.addEventListener("submit", (event) => {
     const files = input?.files;
-    if (!files || !files.length) {
+    if (!isResolve && (!files || !files.length)) {
       event.preventDefault();
       updateSubmitState();
       return;
@@ -32,21 +42,28 @@
       return;
     }
 
-    let total = 0;
-    for (const file of files) {
-      total += file.size;
-    }
-
     submitting = true;
     if (submit) {
       submit.disabled = true;
-      submit.textContent = "送信中…";
+      submit.textContent = isResolve ? "処理中…" : "送信中…";
     }
     if (waiting) {
       waiting.hidden = false;
-      const mb = (total / (1024 * 1024)).toFixed(1);
-      waiting.textContent =
-        `送信中（${files.length} 件・合計 ${mb} MB）… 大きいファイルは数分かかることがあります。完了するまでこのタブを閉じず、再送信しないでください。`;
+      waiting.setAttribute("aria-busy", "true");
+    }
+    if (waitingText) {
+      if (isResolve) {
+        waitingText.textContent =
+          "アップロードを処理しています… 大きいファイルは数分かかることがあります。";
+      } else {
+        let total = 0;
+        for (const file of files) {
+          total += file.size;
+        }
+        const mb = (total / (1024 * 1024)).toFixed(1);
+        waitingText.textContent =
+          `送信中（${files.length} 件・合計 ${mb} MB）… 大きいファイルは数分かかることがあります。完了するまでこのタブを閉じず、再送信しないでください。`;
+      }
     }
   });
 
@@ -57,6 +74,10 @@
     }
     if (waiting) {
       waiting.hidden = true;
+      waiting.setAttribute("aria-busy", "false");
+    }
+    if (waitingText) {
+      waitingText.textContent = "";
     }
     updateSubmitState();
   });

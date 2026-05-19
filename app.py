@@ -1,22 +1,28 @@
+import json
 import logging
 import os
 import re
+import shutil
 import socket
 import time
 import sqlite3
 import sys
+import uuid
 from pathlib import Path
 
 from flask import (
     Flask,
     abort,
     flash,
+    get_flashed_messages,
     make_response,
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
+from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import RequestEntityTooLarge
 import db
 import media_util
@@ -26,6 +32,9 @@ BASE_DIR = Path(__file__).parent
 HOST = os.environ.get("WEBGIF_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WEBGIF_PORT", "5055"))
 UPLOAD_DIR = BASE_DIR / "uploads"
+PENDING_UPLOAD_ROOT = (
+    Path(os.environ.get("WEBGIF_UPLOAD_TMP", "/tmp/webgif-uploads")) / "pending"
+)
 ALLOWED_EXTENSIONS = media_util.ALLOWED_IMAGE_EXTENSIONS
 GIFS_PER_PAGE = 10
 def _max_upload_bytes():
@@ -63,11 +72,55 @@ def _series_filter_active():
     return _series_only() or _active_series_id() is not None
 
 
+def _filter_applied():
+    if _visibility_hidden():
+        return True
+    if _favorite_only():
+        return True
+    if _series_filter_active():
+        return True
+    if request.args.get("category", type=int):
+        return True
+    return bool(_active_tag_ids())
+
+
+def _visibility_hidden():
+    return request.args.get("visibility") == "hidden"
+
+
+def _gallery_visibility():
+    return "hidden" if _visibility_hidden() else "visible"
+
+
+def _favorite_only():
+    return request.args.get("favorite") == "1" and not _visibility_hidden()
+
+
 _UNSET = object()
 
 
+def _append_gallery_filters(kw, visibility=_UNSET, favorite=_UNSET):
+    if visibility is _UNSET:
+        if _visibility_hidden():
+            kw["visibility"] = "hidden"
+    elif visibility == "hidden":
+        kw["visibility"] = "hidden"
+    if favorite is _UNSET:
+        if _favorite_only():
+            kw["favorite"] = 1
+    elif favorite:
+        kw["favorite"] = 1
+    return kw
+
+
 def _gallery_query(
-    category=_UNSET, tag=_UNSET, series_only=_UNSET, series=_UNSET, page=None
+    category=_UNSET,
+    tag=_UNSET,
+    series_only=_UNSET,
+    series=_UNSET,
+    visibility=_UNSET,
+    favorite=_UNSET,
+    page=None,
 ):
     kw = {}
     if page is not None:
@@ -75,11 +128,11 @@ def _gallery_query(
     series_id = _active_series_id() if series is _UNSET else series
     if series_id:
         kw["series"] = series_id
-        return kw
+        return _append_gallery_filters(kw, visibility, favorite)
     use_series_only = _series_only() if series_only is _UNSET else bool(series_only)
     if use_series_only:
         kw["series_only"] = 1
-        return kw
+        return _append_gallery_filters(kw, visibility, favorite)
     if category is not _UNSET:
         if category:
             kw["category"] = category
@@ -93,7 +146,23 @@ def _gallery_query(
         tag_ids = _active_tag_ids()
     if tag_ids:
         kw["tag"] = tag_ids
-    return kw
+    return _append_gallery_filters(kw, visibility, favorite)
+
+
+def _build_htmx_response(html: str, *, redirect_url: str | None = None):
+    """HTMX 用 Response。フラッシュは HX-Trigger で渡す（OOB は環境により不安定なため）。"""
+    resp = make_response(html)
+    if redirect_url:
+        resp.headers["HX-Redirect"] = redirect_url
+        return resp
+    messages = get_flashed_messages(with_categories=True)
+    if messages:
+        resp.headers["HX-Trigger"] = json.dumps({"webgifFlash": messages})
+    return resp
+
+
+def _render_htmx(template: str, **kwargs):
+    return _build_htmx_response(render_template(template, **kwargs))
 
 
 def create_app():
@@ -153,6 +222,9 @@ def create_app():
             "active_series_only": _series_only() and not _active_series_id(),
             "active_series_id": _active_series_id(),
             "series_filter_active": series_filter,
+            "filter_applied": _filter_applied(),
+            "visibility_hidden": _visibility_hidden(),
+            "favorite_only": _favorite_only(),
             "series_list": series_list,
             "gallery_query": _gallery_query,
             "page_loaded_at": db.now_jst(),
@@ -168,12 +240,16 @@ def create_app():
         category_id = None if series_filter else request.args.get("category", type=int)
         tag_ids = [] if series_filter else _active_tag_ids()
         page = max(1, request.args.get("page", page, type=int))
+        visibility = _gallery_visibility()
+        favorite_only = _favorite_only()
         total = db.count_gifs(
             conn,
             category_id,
             tag_ids,
             series_only=series_only,
             series_id=series_id,
+            visibility=visibility,
+            favorite_only=favorite_only,
         )
         offset = (page - 1) * GIFS_PER_PAGE
         gifs = db.fetch_gifs(
@@ -184,6 +260,8 @@ def create_app():
             offset=offset,
             series_only=series_only,
             series_id=series_id,
+            visibility=visibility,
+            favorite_only=favorite_only,
         )
         loaded = offset + len(gifs)
         return {
@@ -245,6 +323,9 @@ def create_app():
     @app.route("/gifs/upload", methods=["POST"])
     def upload_gif():
         webgif_log.log("upload started")
+        if request.form.get("resolve_conflicts") == "1":
+            return _finish_pending_upload()
+
         files = [f for f in request.files.getlist("files") if f and f.filename]
         if not files:
             legacy = request.files.get("file")
@@ -254,80 +335,59 @@ def create_app():
         if not files:
             return _upload_error("ファイルを選択してください。")
 
-        category_id = request.form.get("category_id", type=int) or None
-        tag_ids = _parse_tag_ids(request.form)
-        form_title = (request.form.get("title") or "").strip() or None
-        single_file = len(files) == 1
-
-        uploaded = 0
-        skipped = []
-        reserved_names: set[str] = set()
+        meta = {
+            "category_id": request.form.get("category_id", type=int) or None,
+            "tag_ids": _parse_tag_ids(request.form),
+            "title": (request.form.get("title") or "").strip() or None,
+            "single_file": len(files) == 1,
+        }
 
         with db.get_db() as conn:
-            for file in files:
+            conflicts = []
+            for i, file in enumerate(files):
                 ext = (
                     file.filename.rsplit(".", 1)[-1].lower()
                     if "." in file.filename
                     else ""
                 )
                 if ext not in ALLOWED_EXTENSIONS:
-                    skipped.append(
-                        f"{file.filename}（{media_util.EXTENSIONS_LABEL} 以外）"
+                    continue
+                normalized, conflict = media_util.find_filename_conflict(
+                    file.filename, UPLOAD_DIR, conn
+                )
+                if conflict:
+                    digest = media_util.compare_upload_to_existing(
+                        file, UPLOAD_DIR / normalized
                     )
-                    continue
+                    conflicts.append(
+                        {
+                            "index": i,
+                            "original": file.filename,
+                            "normalized": normalized,
+                            "conflict": conflict,
+                            "alternate": media_util.preview_alternate_filename(
+                                normalized
+                            ),
+                            **digest,
+                        }
+                    )
 
-                stored = media_util.allocate_stored_filename(
-                    file.filename,
-                    UPLOAD_DIR,
-                    conn,
-                    reserved=reserved_names,
+            if conflicts:
+                batch_id = _stash_upload_batch(files, meta, conflicts)
+                session["upload_batch_id"] = batch_id
+                return render_template(
+                    "upload_resolve.html",
+                    batch_id=batch_id,
+                    conflicts=conflicts,
+                    meta=meta,
                 )
-                dest = UPLOAD_DIR / stored
-                t0 = time.monotonic()
-                try:
-                    media_util.save_upload_file(file, dest)
-                except OSError as exc:
-                    webgif_log.log(f"upload save failed: {file.filename} ({exc})")
-                    skipped.append(f"{file.filename}（保存失敗）")
-                    continue
-                webgif_log.log(
-                    f"upload saved: {stored} ({time.monotonic() - t0:.1f}s)"
-                )
 
-                if single_file and form_title:
-                    title = form_title
-                else:
-                    title = _title_from_filename(file.filename)
-
-                gallery_order = db.next_gallery_order(conn)
-                cur = conn.execute(
-                    "INSERT INTO gifs "
-                    "(filename, title, category_id, gallery_order, created_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (stored, title, category_id, gallery_order, db.now_jst()),
-                )
-                db.set_gif_tags(conn, cur.lastrowid, tag_ids)
-                uploaded += 1
-
+            uploaded, skipped = _save_upload_files(
+                conn, files, meta, reserved_names=set()
+            )
             conn.commit()
 
-        if uploaded == 0:
-            detail = "、".join(skipped[:5])
-            return _upload_error(
-                f"アップロードできませんでした。{detail}"
-                if detail
-                else f"対応形式（{media_util.EXTENSIONS_LABEL}）のファイルがありません。"
-            )
-
-        msg = f"{uploaded} 件をアップロードしました。"
-        if skipped:
-            msg += f"（{len(skipped)} 件スキップ: " + "、".join(skipped[:5])
-            if len(skipped) > 5:
-                msg += " ほか"
-            msg += "）"
-        flash(msg, "success")
-        webgif_log.log(f"upload done ({uploaded} files)")
-        return redirect(url_for("index"))
+        return _upload_result(uploaded, skipped)
 
     @app.route("/gifs/<int:gif_id>/edit", methods=["GET", "POST"])
     def edit_gif(gif_id):
@@ -354,11 +414,9 @@ def create_app():
                 db.set_gif_series(conn, gif_id, series_id, series_order)
                 conn.commit()
                 gif = db.get_gif(conn, gif_id)
+                flash("保存しました。", "success")
                 if request.headers.get("HX-Request"):
-                    return render_template(
-                        "partials/gif_card.html",
-                        gif=gif,
-                    )
+                    return _render_htmx("partials/gif_card.html", gif=gif)
                 return redirect(url_for("index"))
 
         selected_tag_ids = {t["id"] for t in gif["tags"]}
@@ -385,18 +443,66 @@ def create_app():
             if path.exists():
                 path.unlink()
 
+        flash("画像を削除しました。", "success")
         if request.headers.get("HX-Request"):
-            with db.get_db() as conn:
-                list_ctx = _gif_list_context(conn, page=1)
-                categories = db.fetch_categories(conn)
-                tags = db.fetch_tags(conn)
-            return render_template(
-                "partials/gif_list_refresh.html",
-                categories=categories,
-                tags=tags,
-                **list_ctx,
-            )
+            return _htmx_gif_list_refresh()
         return redirect(url_for("index"))
+
+    def _htmx_gif_list_refresh():
+        with db.get_db() as conn:
+            list_ctx = _gif_list_context(conn, page=1)
+            categories = db.fetch_categories(conn)
+            tags = db.fetch_tags(conn)
+        return _render_htmx(
+            "partials/gif_list_refresh.html",
+            categories=categories,
+            tags=tags,
+            **list_ctx,
+        )
+
+    @app.route("/gifs/<int:gif_id>/hide", methods=["POST"])
+    def hide_gif(gif_id):
+        with db.get_db() as conn:
+            if not db.get_gif(conn, gif_id):
+                abort(404)
+            db.set_gif_hidden(conn, gif_id, True)
+            conn.commit()
+        flash("画像を非表示にしました。", "success")
+        if request.headers.get("HX-Request"):
+            return _htmx_gif_list_refresh()
+        return redirect(request.referrer or url_for("index"))
+
+    @app.route("/gifs/<int:gif_id>/unhide", methods=["POST"])
+    def unhide_gif(gif_id):
+        with db.get_db() as conn:
+            if not db.get_gif(conn, gif_id):
+                abort(404)
+            db.set_gif_hidden(conn, gif_id, False)
+            conn.commit()
+        flash("画像を再表示しました。", "success")
+        if request.headers.get("HX-Request"):
+            return _htmx_gif_list_refresh()
+        return redirect(request.referrer or url_for("index", visibility="hidden"))
+
+    @app.route("/gifs/<int:gif_id>/favorite", methods=["POST"])
+    def toggle_favorite_gif(gif_id):
+        with db.get_db() as conn:
+            gif = db.get_gif(conn, gif_id)
+            if not gif:
+                abort(404)
+            was_favorite = bool(gif.get("favorite"))
+            db.set_gif_favorite(conn, gif_id, not was_favorite)
+            conn.commit()
+            gif = db.get_gif(conn, gif_id)
+        if was_favorite:
+            flash("お気に入りを解除しました。", "success")
+        else:
+            flash("お気に入りに追加しました。", "success")
+        if request.headers.get("HX-Request"):
+            if _favorite_only() and was_favorite:
+                return _htmx_gif_list_refresh()
+            return _render_htmx("partials/gif_card.html", gif=gif)
+        return redirect(request.referrer or url_for("index"))
 
     @app.route("/gifs/<int:gif_id>/gallery-shift", methods=["POST"])
     def shift_gif_gallery_order(gif_id):
@@ -412,6 +518,8 @@ def create_app():
                 tag_ids=[] if _series_filter_active() else _active_tag_ids(),
                 series_only=_series_only() and not _active_series_id(),
                 series_id=_active_series_id(),
+                visibility=_gallery_visibility(),
+                favorite_only=_favorite_only(),
             )
             if not ok:
                 flash("並び順を変更できませんでした。", "error")
@@ -420,18 +528,10 @@ def create_app():
         if request.headers.get("HX-Request"):
             with db.get_db() as conn:
                 if request.form.get("refresh_list"):
-                    list_ctx = _gif_list_context(conn, page=1)
-                    categories = db.fetch_categories(conn)
-                    tags = db.fetch_tags(conn)
-                    return render_template(
-                        "partials/gif_list_refresh.html",
-                        categories=categories,
-                        tags=tags,
-                        **list_ctx,
-                    )
+                    return _htmx_gif_list_refresh()
                 gif = db.get_gif(conn, gif_id)
             if gif:
-                return render_template("partials/gif_card.html", gif=gif)
+                return _render_htmx("partials/gif_card.html", gif=gif)
         return redirect(request.referrer or url_for("index"))
 
     @app.route("/gifs/<int:gif_id>/series-shift", methods=["POST"])
@@ -445,24 +545,17 @@ def create_app():
         if request.headers.get("HX-Request"):
             with db.get_db() as conn:
                 if request.form.get("refresh_list"):
-                    list_ctx = _gif_list_context(conn, page=1)
-                    categories = db.fetch_categories(conn)
-                    tags = db.fetch_tags(conn)
-                    return render_template(
-                        "partials/gif_list_refresh.html",
-                        categories=categories,
-                        tags=tags,
-                        **list_ctx,
-                    )
+                    return _htmx_gif_list_refresh()
                 gif = db.get_gif(conn, gif_id)
             if gif:
-                return render_template("partials/gif_card.html", gif=gif)
+                return _render_htmx("partials/gif_card.html", gif=gif)
         return redirect(request.referrer or url_for("index"))
 
     @app.route("/series", methods=["POST"])
     def create_series():
         name = _normalize_name(request.form.get("name"))
         if not name:
+            flash("名称を入力してください。", "error")
             return _filters_response()
         with db.get_db() as conn:
             sort_order = db.next_series_sort_order(conn)
@@ -472,6 +565,7 @@ def create_app():
                 (name, sort_order, db.now_jst()),
             )
             conn.commit()
+        flash(f"シリーズ「{name}」を追加しました。", "success")
         return _filters_response()
 
     @app.route("/series/<int:series_id>/rename", methods=["POST"])
@@ -494,6 +588,8 @@ def create_app():
                 conn.commit()
             except sqlite3.IntegrityError:
                 flash(f"「{name}」は既に使われています。", "error")
+            else:
+                flash("シリーズ名を変更しました。", "success")
         return _filters_response()
 
     @app.route("/series/<int:series_id>/delete", methods=["POST"])
@@ -530,12 +626,14 @@ def create_app():
                     (series_id, order, gif_id),
                 )
             conn.commit()
+        flash("シリーズ内の並び順を保存しました。", "success")
         return _filters_response()
 
     @app.route("/categories", methods=["POST"])
     def create_category():
         name = _normalize_name(request.form.get("name"))
         if not name:
+            flash("名称を入力してください。", "error")
             return _filters_response()
         with db.get_db() as conn:
             conn.execute(
@@ -543,12 +641,14 @@ def create_app():
                 (name, db.now_jst()),
             )
             conn.commit()
+        flash(f"カテゴリ「{name}」を追加しました。", "success")
         return _filters_response()
 
     @app.route("/tags", methods=["POST"])
     def create_tag():
         name = _normalize_name(request.form.get("name"))
         if not name:
+            flash("名称を入力してください。", "error")
             return _filters_response()
         with db.get_db() as conn:
             conn.execute(
@@ -556,6 +656,7 @@ def create_app():
                 (name, db.now_jst()),
             )
             conn.commit()
+        flash(f"タグ「{name}」を追加しました。", "success")
         return _filters_response()
 
     @app.route("/categories/<int:category_id>/rename", methods=["POST"])
@@ -578,6 +679,8 @@ def create_app():
                 conn.commit()
             except sqlite3.IntegrityError:
                 flash(f"「{name}」は既に使われています。", "error")
+            else:
+                flash("カテゴリ名を変更しました。", "success")
         return _filters_response()
 
     @app.route("/tags/<int:tag_id>/rename", methods=["POST"])
@@ -600,6 +703,8 @@ def create_app():
                 conn.commit()
             except sqlite3.IntegrityError:
                 flash(f"「{name}」は既に使われています。", "error")
+            else:
+                flash("タグ名を変更しました。", "success")
         return _filters_response()
 
     @app.route("/categories/<int:category_id>/delete", methods=["POST"])
@@ -734,17 +839,13 @@ def _filters_response(redirect_url=None):
         categories = db.fetch_categories(conn)
         tags = db.fetch_tags(conn)
         series_entries = _series_entries(conn)
-    resp = make_response(
-        render_template(
-            "partials/filters_oob.html",
-            categories=categories,
-            tags=tags,
-            series_entries=series_entries,
-        )
+    body = render_template(
+        "partials/filters_oob.html",
+        categories=categories,
+        tags=tags,
+        series_entries=series_entries,
     )
-    if redirect_url:
-        resp.headers["HX-Redirect"] = redirect_url
-    return resp
+    return _build_htmx_response(body, redirect_url=redirect_url)
 
 
 def _hx_redirect(location):
@@ -756,6 +857,270 @@ def _hx_redirect(location):
 def _upload_error(message):
     flash(message, "error")
     return redirect(request.referrer or url_for("index"))
+
+
+def _upload_result(uploaded: int, skipped: list[str]):
+    if uploaded == 0:
+        detail = "、".join(skipped[:5])
+        return _upload_error(
+            f"アップロードできませんでした。{detail}"
+            if detail
+            else f"対応形式（{media_util.EXTENSIONS_LABEL}）のファイルがありません。"
+        )
+    msg = f"{uploaded} 件をアップロードしました。"
+    if skipped:
+        msg += f"（{len(skipped)} 件スキップ: " + "、".join(skipped[:5])
+        if len(skipped) > 5:
+            msg += " ほか"
+        msg += "）"
+    flash(msg, "success")
+    webgif_log.log(f"upload done ({uploaded} files)")
+    return redirect(url_for("index"))
+
+
+def _batch_dir(batch_id: str) -> Path:
+    if not re.fullmatch(r"[a-f0-9]{32}", batch_id):
+        abort(400)
+    return PENDING_UPLOAD_ROOT / batch_id
+
+
+def _stash_upload_batch(files, meta: dict, conflicts: list) -> str:
+    batch_id = uuid.uuid4().hex
+    batch_path = _batch_dir(batch_id)
+    batch_path.mkdir(parents=True, exist_ok=True)
+    conflict_indexes = {c["index"] for c in conflicts}
+    manifest_files = []
+    for i, file in enumerate(files):
+        part = batch_path / f"{i}.part"
+        file.save(part)
+        entry = {"index": i, "original": file.filename}
+        if i in conflict_indexes:
+            entry["has_conflict"] = True
+        manifest_files.append(entry)
+    manifest = {**meta, "files": manifest_files}
+    (batch_path / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+    return batch_id
+
+
+def _load_batch_manifest(batch_id: str) -> dict:
+    path = _batch_dir(batch_id) / "manifest.json"
+    if not path.is_file():
+        abort(404)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _cleanup_batch(batch_id: str) -> None:
+    shutil.rmtree(_batch_dir(batch_id), ignore_errors=True)
+    session.pop("upload_batch_id", None)
+
+
+def _stashed_file_storage(batch_path: Path, index: int, original: str) -> FileStorage:
+    part = batch_path / f"{index}.part"
+    if not part.is_file():
+        raise FileNotFoundError(part)
+    return FileStorage(
+        stream=part.open("rb"),
+        filename=original,
+        content_type=media_util.mimetype_for_filename(original),
+    )
+
+
+def _title_for_upload(original: str, meta: dict) -> str | None:
+    if meta.get("single_file") and meta.get("title"):
+        return meta["title"]
+    return _title_from_filename(original)
+
+
+def _insert_gif(
+    conn,
+    stored: str,
+    title: str | None,
+    category_id,
+    tag_ids: list[int],
+) -> None:
+    gallery_order = db.next_gallery_order(conn)
+    cur = conn.execute(
+        "INSERT INTO gifs "
+        "(filename, title, category_id, gallery_order, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (stored, title, category_id, gallery_order, db.now_jst()),
+    )
+    db.set_gif_tags(conn, cur.lastrowid, tag_ids)
+
+
+def _replace_gif_record(
+    conn,
+    conflict: dict,
+    storage: FileStorage,
+    stored: str,
+    title: str | None,
+    category_id,
+    tag_ids: list[int],
+) -> int | None:
+    """既存レコードを削除し、新規 INSERT（ID・登録日時・並び順は新しくなる）。"""
+    old_filename = conflict["filename"]
+    old_id = conflict.get("id")
+    if old_id:
+        conn.execute("DELETE FROM gifs WHERE id = ?", (old_id,))
+    if old_filename != stored:
+        old_path = UPLOAD_DIR / old_filename
+        if old_path.is_file():
+            old_path.unlink()
+    media_util.save_upload_file(storage, UPLOAD_DIR / stored)
+    gallery_order = db.next_gallery_order(conn)
+    cur = conn.execute(
+        "INSERT INTO gifs "
+        "(filename, title, category_id, gallery_order, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (stored, title, category_id, gallery_order, db.now_jst()),
+    )
+    db.set_gif_tags(conn, cur.lastrowid, tag_ids)
+    return cur.lastrowid
+
+
+def _save_upload_files(
+    conn,
+    files,
+    meta: dict,
+    *,
+    reserved_names: set[str],
+    actions: dict[int, str] | None = None,
+    conflicts_by_index: dict[int, dict] | None = None,
+    batch_path: Path | None = None,
+) -> tuple[int, list[str]]:
+    uploaded = 0
+    skipped = []
+    actions = actions or {}
+    conflicts_by_index = conflicts_by_index or {}
+
+    for i, file in enumerate(files):
+        if batch_path is not None:
+            original = file if isinstance(file, str) else file.filename
+            storage = _stashed_file_storage(batch_path, i, original)
+        else:
+            storage = file
+            original = file.filename
+
+        ext = (
+            original.rsplit(".", 1)[-1].lower() if "." in original else ""
+        )
+        if ext not in ALLOWED_EXTENSIONS:
+            skipped.append(f"{original}（{media_util.EXTENSIONS_LABEL} 以外）")
+            continue
+
+        action = actions.get(i, "new")
+        if action == "skip":
+            skipped.append(f"{original}（スキップ）")
+            continue
+
+        conflict = conflicts_by_index.get(i)
+        title = _title_for_upload(original, meta)
+
+        try:
+            if action == "replace" and conflict:
+                stored = conflict["filename"]
+                new_id = _replace_gif_record(
+                    conn,
+                    conflict,
+                    storage,
+                    stored,
+                    title,
+                    meta["category_id"],
+                    meta["tag_ids"],
+                )
+                webgif_log.log(
+                    f"upload replaced: {stored} (old id={conflict.get('id')} -> new id={new_id})"
+                )
+            elif action == "both" and conflict:
+                normalized = conflict["filename"]
+                stored = media_util.allocate_alternate_filename(
+                    normalized,
+                    UPLOAD_DIR,
+                    conn,
+                    reserved=reserved_names,
+                )
+                media_util.save_upload_file(storage, UPLOAD_DIR / stored)
+                _insert_gif(
+                    conn, stored, title, meta["category_id"], meta["tag_ids"]
+                )
+                webgif_log.log(f"upload saved (both): {stored}")
+            else:
+                stored = media_util.allocate_stored_filename(
+                    original,
+                    UPLOAD_DIR,
+                    conn,
+                    reserved=reserved_names,
+                )
+                t0 = time.monotonic()
+                media_util.save_upload_file(storage, UPLOAD_DIR / stored)
+                _insert_gif(
+                    conn, stored, title, meta["category_id"], meta["tag_ids"]
+                )
+                webgif_log.log(
+                    f"upload saved: {stored} ({time.monotonic() - t0:.1f}s)"
+                )
+            uploaded += 1
+        except OSError as exc:
+            webgif_log.log(f"upload save failed: {original} ({exc})")
+            skipped.append(f"{original}（保存失敗）")
+        finally:
+            if batch_path is not None and hasattr(storage, "close"):
+                storage.close()
+
+    return uploaded, skipped
+
+
+def _finish_pending_upload():
+    batch_id = request.form.get("batch_id", "")
+    if not batch_id or batch_id != session.get("upload_batch_id"):
+        flash("アップロードの確認が期限切れです。もう一度ファイルを選んでください。", "error")
+        return redirect(url_for("index"))
+
+    manifest = _load_batch_manifest(batch_id)
+    meta = {
+        "category_id": manifest.get("category_id"),
+        "tag_ids": manifest.get("tag_ids") or [],
+        "title": manifest.get("title"),
+        "single_file": manifest.get("single_file", False),
+    }
+    batch_path = _batch_dir(batch_id)
+
+    with db.get_db() as conn:
+        conflicts_by_index = {}
+        for entry in manifest["files"]:
+            if not entry.get("has_conflict"):
+                continue
+            idx = entry["index"]
+            _normalized, conflict = media_util.find_filename_conflict(
+                entry["original"], UPLOAD_DIR, conn
+            )
+            if conflict:
+                conflicts_by_index[idx] = conflict
+
+        actions = {}
+        for entry in manifest["files"]:
+            idx = entry["index"]
+            if entry.get("has_conflict"):
+                actions[idx] = request.form.get(f"action_{idx}", "skip")
+            else:
+                actions[idx] = "new"
+
+        originals = [e["original"] for e in manifest["files"]]
+        uploaded, skipped = _save_upload_files(
+            conn,
+            originals,
+            meta,
+            reserved_names=set(),
+            actions=actions,
+            conflicts_by_index=conflicts_by_index,
+            batch_path=batch_path,
+        )
+        conn.commit()
+
+    _cleanup_batch(batch_id)
+    return _upload_result(uploaded, skipped)
 
 
 app = create_app()

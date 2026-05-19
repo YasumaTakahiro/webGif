@@ -1,13 +1,18 @@
 """画像ファイルの拡張子・MIME・検索の共通定義。"""
 
+import hashlib
 import os
 import re
 import shutil
 import tempfile
 import uuid
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from werkzeug.utils import secure_filename
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 _UPLOAD_TMP = os.environ.get("WEBGIF_UPLOAD_TMP", "").strip()
 
@@ -108,6 +113,118 @@ def _filename_taken(
     )
 
 
+_HASH_CHUNK = 65536
+
+
+def sha256_hex_path(path: Path) -> str | None:
+    """ファイルの SHA-256（16進小文字）。存在しない場合は None。"""
+    path = Path(path)
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(_HASH_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_hex_file_storage(storage) -> str:
+    """FileStorage の内容の SHA-256（読み取り後にストリーム位置を戻す）。"""
+    stream = storage.stream
+    pos = stream.tell() if hasattr(stream, "tell") else None
+    digest = hashlib.sha256()
+    try:
+        if hasattr(stream, "seek"):
+            stream.seek(0)
+        while True:
+            chunk = stream.read(_HASH_CHUNK)
+            if not chunk:
+                break
+            digest.update(chunk)
+    finally:
+        if hasattr(stream, "seek"):
+            stream.seek(pos if pos is not None else 0)
+    return digest.hexdigest()
+
+
+def compare_upload_to_existing(storage, existing_path: Path) -> dict:
+    """アップロード予定と既存ファイルの SHA-256 比較。
+
+    Returns:
+        sha256_new, sha256_existing (str | None), same_content (bool | None)
+    """
+    new_hash = sha256_hex_file_storage(storage)
+    existing_hash = sha256_hex_path(existing_path)
+    if existing_hash is None:
+        return {
+            "sha256_new": new_hash,
+            "sha256_existing": None,
+            "same_content": None,
+        }
+    return {
+        "sha256_new": new_hash,
+        "sha256_existing": existing_hash,
+        "same_content": new_hash == existing_hash,
+    }
+
+
+def find_filename_conflict(
+    original: str, upload_dir: Path, conn
+) -> tuple[str | None, dict | None]:
+    """正規化ファイル名が uploads / DB に既にあるか。 (normalized, conflict_row)"""
+    normalized = normalize_upload_filename(original)
+    if not normalized:
+        return None, None
+    row = conn.execute(
+        "SELECT id, filename, title FROM gifs WHERE filename = ?",
+        (normalized,),
+    ).fetchone()
+    if row:
+        return normalized, dict(row)
+    if (upload_dir / normalized).exists():
+        return normalized, {
+            "id": None,
+            "filename": normalized,
+            "title": None,
+        }
+    return normalized, None
+
+
+def _timestamp_suffix() -> str:
+    """ファイル名用の JST タイムスタンプ（例: 20260519_143022）。"""
+    return datetime.now(_JST).strftime("%Y%m%d_%H%M%S")
+
+
+def _stem_with_timestamp(stem: str, extra: str = "") -> str:
+    """語尾に _YYYYMMDD_HHMMSS（+ 任意の extra）を付けた stem。"""
+    suffix = f"_{_timestamp_suffix()}{extra}"
+    max_stem = _MAX_BASENAME_LEN - len(suffix)
+    stem_part = stem if len(stem) <= max_stem else stem[:max_stem]
+    return f"{stem_part}{suffix}"
+
+
+def allocate_alternate_filename(
+    base_normalized: str,
+    upload_dir: Path,
+    conn,
+    *,
+    reserved: set[str] | None = None,
+) -> str:
+    """同名時に語尾へタイムスタンプを付けたファイル名（例: photo_20260519_143022.gif）。"""
+    reserved = reserved if reserved is not None else set()
+    stem = Path(base_normalized).stem
+    ext = extension_from_filename(base_normalized)
+    for attempt in range(100):
+        extra = f"_{attempt}" if attempt else ""
+        candidate = f"{_stem_with_timestamp(stem, extra)}.{ext}"
+        if not _filename_taken(candidate, upload_dir, conn, reserved):
+            reserved.add(candidate)
+            return candidate
+    fallback = stored_filename(uuid.uuid4().hex, ext)
+    reserved.add(fallback)
+    return fallback
+
+
 def allocate_stored_filename(
     original: str,
     upload_dir: Path,
@@ -128,6 +245,13 @@ def allocate_stored_filename(
     fallback = stored_filename(uuid.uuid4().hex, ext)
     reserved.add(fallback)
     return fallback
+
+
+def preview_alternate_filename(base_normalized: str) -> str:
+    """UI 表示用の候補名（保存時点の JST タイムスタンプを付与）。"""
+    stem = Path(base_normalized).stem
+    ext = extension_from_filename(base_normalized)
+    return f"{_stem_with_timestamp(stem)}.{ext}"
 
 
 def mimetype_for_filename(filename: str) -> str:

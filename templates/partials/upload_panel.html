@@ -41,7 +41,17 @@
   </fieldset>
   <button type="submit" class="btn btn-primary" id="upload-submit" disabled>追加</button>
 </form>
-<p class="upload-waiting" id="upload-waiting" hidden></p>
+<div
+  class="upload-waiting"
+  id="upload-waiting"
+  hidden
+  role="status"
+  aria-live="polite"
+  aria-busy="false"
+>
+  <span class="upload-spinner" aria-hidden="true"></span>
+  <p class="upload-waiting-text" id="upload-waiting-text"></p>
+</div>
 <p class="hint upload-note">
   送信が始まるとブラウザのタブが読み込み中になります。Dev Container では大きい GIF で数分かかることがあります。<br>
   進捗は <code>webgif.log</code> の <code>upload saved:</code> でも確認できます。

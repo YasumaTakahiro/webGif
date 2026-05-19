@@ -5,6 +5,13 @@
   <button type="button" class="btn btn-ghost btn-small" data-dialog-open="dialog-upload">アップロード</button>
   <button type="button" class="btn btn-ghost btn-small" data-dialog-open="dialog-manage">カテゴリ・タグ</button>
   <button type="button" class="btn btn-ghost btn-small" data-dialog-open="dialog-series">シリーズ</button>
+  <button
+    type="button"
+    class="btn btn-ghost btn-small header-filter-toggle{% if filter_applied %} header-filter-toggle-active{% endif %}"
+    id="filter-panel-toggle"
+    aria-expanded="false"
+    aria-controls="filter-panel"
+  >絞り込み</button>
 </nav>
 {% endblock %}
 
@@ -24,6 +31,7 @@
 
 {% block scripts %}
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<script src="{{ url_for('static', filename='confirm.js') }}"></script>
 <script src="{{ url_for('static', filename='filter_panel.js') }}"></script>
 <script src="{{ url_for('static', filename='dialogs.js') }}"></script>
 <script src="{{ url_for('static', filename='upload.js') }}"></script>

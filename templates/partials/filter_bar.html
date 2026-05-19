@@ -1,4 +1,49 @@
 <div class="filter-panel-rows">
+  <div class="filter-panel-row filter-panel-row-visibility">
+    <span class="filter-panel-label">表示</span>
+    <div class="chip-row">
+      <button
+        type="button"
+        class="chip {% if not visibility_hidden %}chip-active{% endif %}"
+        hx-get="{{ url_for('partial_gif_list', **gallery_query(visibility=None)) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+        hx-push-url="{{ url_for('index', **gallery_query(visibility=None)) }}"
+      >表示中のみ</button>
+      <button
+        type="button"
+        class="chip {% if visibility_hidden %}chip-active{% endif %}"
+        hx-get="{{ url_for('partial_gif_list', **gallery_query(visibility='hidden')) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+        hx-push-url="{{ url_for('index', **gallery_query(visibility='hidden')) }}"
+      >非表示のみ</button>
+    </div>
+    <p class="hint filter-visibility-hint">非表示にした画像はファイルを残したまま一覧から外れます</p>
+  </div>
+
+  <div class="filter-panel-row filter-panel-row-favorite{% if visibility_hidden %} filter-panel-row-muted{% endif %}">
+    <span class="filter-panel-label">お気に入り</span>
+    <div class="chip-row">
+      <button
+        type="button"
+        class="chip {% if not favorite_only and not visibility_hidden %}chip-active{% endif %}"
+        hx-get="{{ url_for('partial_gif_list', **gallery_query(favorite=False)) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+        hx-push-url="{{ url_for('index', **gallery_query(favorite=False)) }}"
+      >すべて</button>
+      <button
+        type="button"
+        class="chip {% if favorite_only %}chip-active{% endif %}"
+        hx-get="{{ url_for('partial_gif_list', **gallery_query(favorite=True)) }}"
+        hx-target="#gif-list"
+        hx-swap="innerHTML"
+        hx-push-url="{{ url_for('index', **gallery_query(favorite=True)) }}"
+      >お気に入りのみ</button>
+    </div>
+  </div>
+
   <div class="filter-panel-row filter-panel-row-series">
     <span class="filter-panel-label">シリーズ</span>
     <div class="chip-row">

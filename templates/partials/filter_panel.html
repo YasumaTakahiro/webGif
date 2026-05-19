@@ -1,14 +1,9 @@
-<section class="filter-panel{% if series_filter_active %} filter-panel-series-only{% endif %}" id="filter-panel" aria-labelledby="filter-panel-heading">
-  <div class="filter-panel-header">
-    <h2 id="filter-panel-heading" class="filter-panel-heading">絞り込み</h2>
-    <button
-      type="button"
-      class="btn btn-ghost btn-small filter-panel-toggle"
-      id="filter-panel-toggle"
-      aria-expanded="true"
-      aria-controls="filter-panel-body"
-    >絞り込みを隠す</button>
-  </div>
+<section
+  class="filter-panel filter-panel-collapsed{% if series_filter_active %} filter-panel-series-only{% endif %}"
+  id="filter-panel"
+  aria-label="絞り込み"
+  data-filter-applied="{{ '1' if filter_applied else '0' }}"
+>
   <div id="filter-panel-body" class="filter-panel-body">
     {% include "partials/filter_bar.html" %}
   </div>

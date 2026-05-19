@@ -37,9 +37,10 @@
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
-    const open = document.querySelector(".app-dialog[open]");
-    if (open) {
-      closeDialog(open);
+    const openDialogs = document.querySelectorAll(".app-dialog[open]");
+    const top = openDialogs[openDialogs.length - 1];
+    if (top) {
+      closeDialog(top);
     }
   });
 })();

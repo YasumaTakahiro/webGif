@@ -99,6 +99,34 @@
     </fieldset>
     <div class="form-actions">
       <button type="submit" class="btn btn-primary btn-small">保存</button>
+      {% if not visibility_hidden %}
+        <button
+          type="button"
+          class="btn btn-ghost btn-small btn-favorite{% if gif.favorite %} btn-favorite-on{% endif %}"
+          title="{% if gif.favorite %}お気に入りを解除{% else %}お気に入りに追加{% endif %}"
+          hx-post="{{ url_for('toggle_favorite_gif', gif_id=gif.id, **gallery_query()) }}"
+          hx-target="{% if favorite_only %}#gif-list{% else %}#gif-{{ gif.id }}{% endif %}"
+          hx-swap="{% if favorite_only %}innerHTML{% else %}outerHTML{% endif %}"
+        >{% if gif.favorite %}★{% else %}☆{% endif %}</button>
+      {% endif %}
+      {% if visibility_hidden %}
+        <button
+          type="button"
+          class="btn btn-ghost btn-small"
+          hx-post="{{ url_for('unhide_gif', gif_id=gif.id, **gallery_query()) }}"
+          hx-target="#gif-list"
+          hx-swap="innerHTML"
+        >表示に戻す</button>
+      {% else %}
+        <button
+          type="button"
+          class="btn btn-ghost btn-small"
+          hx-post="{{ url_for('hide_gif', gif_id=gif.id, **gallery_query()) }}"
+          hx-target="#gif-list"
+          hx-swap="innerHTML"
+          hx-confirm="この画像を非表示にしますか？（ファイルは削除されません）"
+        >非表示</button>
+      {% endif %}
       <button
         type="button"
         class="btn btn-ghost btn-small"

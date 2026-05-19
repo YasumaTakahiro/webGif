@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}アップロードの確認 — webGif{% endblock %}
+
+{% block content %}
+<section class="panel upload-resolve-page">
+  <h2>同名ファイルの確認</h2>
+  <p class="hint">
+    次のファイルは既に <code>uploads/</code> または一覧に存在します。それぞれの扱いを選んでから「決定してアップロード」を押してください。
+  </p>
+
+  <form
+    class="upload-resolve-form"
+    action="{{ url_for('upload_gif') }}"
+    method="post"
+  >
+    <input type="hidden" name="resolve_conflicts" value="1">
+    <input type="hidden" name="batch_id" value="{{ batch_id }}">
+
+    {% for c in conflicts %}
+      <fieldset class="upload-conflict-block">
+        <legend>{{ c.original }}</legend>
+        <p class="hint upload-conflict-existing">
+          既存の保存名: <code>{{ c.normalized }}</code>
+          {% if c.conflict.id %}
+            （ID {{ c.conflict.id }}{% if c.conflict.title %} · {{ c.conflict.title }}{% endif %}）
+          {% elif c.conflict.title %}
+            （{{ c.conflict.title }}）
+          {% endif %}
+        </p>
+        <div class="upload-conflict-digest" aria-label="ファイル内容の比較">
+          {% if c.same_content is not none %}
+            <p
+              class="upload-conflict-verdict {% if c.same_content %}upload-conflict-same{% else %}upload-conflict-diff{% endif %}"
+            >
+              {% if c.same_content %}
+                内容は同一です（SHA-256 が一致）
+              {% else %}
+                内容は異なります（SHA-256 が不一致）
+              {% endif %}
+            </p>
+          {% else %}
+            <p class="hint upload-conflict-verdict">既存ファイルを読み取れず、内容は比較できませんでした。</p>
+          {% endif %}
+          <dl class="upload-conflict-hashes">
+            <div>
+              <dt>アップロード予定（SHA-256）</dt>
+              <dd><code class="hash-value">{{ c.sha256_new }}</code></dd>
+            </div>
+            {% if c.sha256_existing %}
+              <div>
+                <dt>既存ファイル（SHA-256）</dt>
+                <dd><code class="hash-value">{{ c.sha256_existing }}</code></dd>
+              </div>
+            {% endif %}
+          </dl>
+        </div>
+        <label class="upload-conflict-option">
+          <input
+            type="radio"
+            name="action_{{ c.index }}"
+            value="skip"
+            checked
+          >
+          アップロードしない（スキップ）
+        </label>
+        <label class="upload-conflict-option">
+          <input type="radio" name="action_{{ c.index }}" value="both">
+          両方残す（<code>{{ c.alternate }}</code> として追加・日時は保存時の JST）
+        </label>
+        <label class="upload-conflict-option">
+          <input type="radio" name="action_{{ c.index }}" value="replace">
+          新しいファイルで置き換える（既存の登録を削除して新規登録）
+        </label>
+      </fieldset>
+    {% endfor %}
+
+    <div
+      class="upload-waiting"
+      id="upload-waiting"
+      hidden
+      role="status"
+      aria-live="polite"
+      aria-busy="false"
+    >
+      <span class="upload-spinner" aria-hidden="true"></span>
+      <p class="upload-waiting-text" id="upload-waiting-text">処理中…</p>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary" id="upload-resolve-submit">
+        決定してアップロード
+      </button>
+      <a class="btn btn-ghost" href="{{ url_for('index') }}">キャンセル</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='upload.js') }}"></script>
+{% endblock %}

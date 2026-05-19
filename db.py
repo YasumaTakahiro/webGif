@@ -41,6 +41,24 @@ def _migrate(conn):
     if "series_order" not in cols:
         conn.execute("ALTER TABLE gifs ADD COLUMN series_order INTEGER")
     _migrate_gallery_order(conn)
+    _migrate_hidden(conn)
+    _migrate_favorite(conn)
+
+
+def _migrate_hidden(conn):
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(gifs)").fetchall()}
+    if "hidden" not in cols:
+        conn.execute(
+            "ALTER TABLE gifs ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def _migrate_favorite(conn):
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(gifs)").fetchall()}
+    if "favorite" not in cols:
+        conn.execute(
+            "ALTER TABLE gifs ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _migrate_gallery_order(conn):
@@ -128,11 +146,25 @@ def init_db():
         _migrate(conn)
 
 
+def _gif_hidden_sql(visibility="visible", alias="g"):
+    col = f"{alias}.hidden" if alias else "hidden"
+    if visibility == "hidden":
+        return f"COALESCE({col}, 0) = 1"
+    return f"COALESCE({col}, 0) = 0"
+
+
+def _gif_favorite_sql(favorite_only=False, alias="g"):
+    if not favorite_only:
+        return "1=1"
+    col = f"{alias}.favorite" if alias else "favorite"
+    return f"COALESCE({col}, 0) = 1"
+
+
 def fetch_categories(conn):
     return conn.execute(
         "SELECT c.*, COUNT(g.id) AS gif_count "
         "FROM categories c "
-        "LEFT JOIN gifs g ON g.category_id = c.id "
+        f"LEFT JOIN gifs g ON g.category_id = c.id AND {_gif_hidden_sql('visible', 'g')} "
         "GROUP BY c.id "
         "ORDER BY c.name"
     ).fetchall()
@@ -143,6 +175,7 @@ def fetch_tags(conn):
         "SELECT t.*, COUNT(gt.gif_id) AS gif_count "
         "FROM tags t "
         "LEFT JOIN gif_tags gt ON gt.tag_id = t.id "
+        f"LEFT JOIN gifs g ON g.id = gt.gif_id AND {_gif_hidden_sql('visible', 'g')} "
         "GROUP BY t.id "
         "ORDER BY t.name"
     ).fetchall()
@@ -152,7 +185,7 @@ def fetch_series(conn):
     return conn.execute(
         "SELECT s.*, COUNT(g.id) AS gif_count "
         "FROM series s "
-        "LEFT JOIN gifs g ON g.series_id = s.id "
+        f"LEFT JOIN gifs g ON g.series_id = s.id AND {_gif_hidden_sql('visible', 'g')} "
         "GROUP BY s.id "
         "ORDER BY s.sort_order, s.name"
     ).fetchall()
@@ -175,8 +208,13 @@ def next_series_sort_order(conn):
     return row["n"] if row else 0
 
 
-def _gif_filter_sql(category_id=None, tag_ids=None):
+def _gif_filter_sql(
+    category_id=None, tag_ids=None, *, visibility="visible", favorite_only=False
+):
     sql = " WHERE 1=1"
+    sql += f" AND {_gif_hidden_sql(visibility, 'g')}"
+    if favorite_only:
+        sql += f" AND {_gif_favorite_sql(True, 'g')}"
     params = []
     if category_id:
         sql += " AND g.category_id = ?"
@@ -185,6 +223,20 @@ def _gif_filter_sql(category_id=None, tag_ids=None):
         sql += " AND g.id IN (SELECT gif_id FROM gif_tags WHERE tag_id = ?)"
         params.append(tag_id)
     return sql, params
+
+
+def set_gif_hidden(conn, gif_id: int, hidden: bool) -> None:
+    conn.execute(
+        "UPDATE gifs SET hidden = ? WHERE id = ?",
+        (1 if hidden else 0, gif_id),
+    )
+
+
+def set_gif_favorite(conn, gif_id: int, favorite: bool) -> None:
+    conn.execute(
+        "UPDATE gifs SET favorite = ? WHERE id = ?",
+        (1 if favorite else 0, gif_id),
+    )
 
 
 def _gif_select_sql():
@@ -264,11 +316,21 @@ def _rows_to_gifs(rows):
 
 
 def fetch_gifs_for_gallery(
-    conn, category_id=None, tag_ids=None, series_only=False, series_id=None
+    conn,
+    category_id=None,
+    tag_ids=None,
+    series_only=False,
+    series_id=None,
+    *,
+    visibility="visible",
+    favorite_only=False,
 ):
+    hidden_clause = _gif_hidden_sql(visibility, "g")
+    favorite_clause = _gif_favorite_sql(favorite_only, "g")
     if series_id:
         rows = conn.execute(
-            f"{_gif_select_sql()} WHERE g.series_id = ?",
+            f"{_gif_select_sql()} WHERE g.series_id = ? AND {hidden_clause} "
+            f"AND {favorite_clause}",
             (series_id,),
         ).fetchall()
         rows.sort(
@@ -281,12 +343,18 @@ def fetch_gifs_for_gallery(
 
     if series_only:
         rows = conn.execute(
-            f"{_gif_select_sql()} WHERE g.series_id IS NOT NULL"
+            f"{_gif_select_sql()} WHERE g.series_id IS NOT NULL AND {hidden_clause} "
+            f"AND {favorite_clause}"
         ).fetchall()
         sorted_rows = _sort_gallery_rows(rows)
         return _attach_tags(conn, _rows_to_gifs(sorted_rows))
 
-    where, params = _gif_filter_sql(category_id, tag_ids)
+    where, params = _gif_filter_sql(
+        category_id,
+        tag_ids,
+        visibility=visibility,
+        favorite_only=favorite_only,
+    )
     matched = conn.execute(
         f"SELECT g.id, g.series_id FROM gifs g{where}",
         params,
@@ -297,7 +365,11 @@ def fetch_gifs_for_gallery(
 
     if series_ids:
         placeholders = ",".join("?" * len(series_ids))
-        expand_sql = f"SELECT id FROM gifs WHERE series_id IN ({placeholders})"
+        expand_sql = (
+            f"SELECT id FROM gifs WHERE series_id IN ({placeholders}) "
+            f"AND {_gif_hidden_sql(visibility, alias=None)} "
+            f"AND {_gif_favorite_sql(favorite_only, alias=None)}"
+        )
         expand_params = list(series_ids)
         if category_id:
             expand_sql += " AND category_id = ?"
@@ -318,7 +390,14 @@ def fetch_gifs_for_gallery(
 
 
 def count_gifs(
-    conn, category_id=None, tag_ids=None, series_only=False, series_id=None
+    conn,
+    category_id=None,
+    tag_ids=None,
+    series_only=False,
+    series_id=None,
+    *,
+    visibility="visible",
+    favorite_only=False,
 ):
     return len(
         fetch_gifs_for_gallery(
@@ -327,6 +406,8 @@ def count_gifs(
             tag_ids,
             series_only=series_only,
             series_id=series_id,
+            visibility=visibility,
+            favorite_only=favorite_only,
         )
     )
 
@@ -339,6 +420,9 @@ def fetch_gifs(
     offset=0,
     series_only=False,
     series_id=None,
+    *,
+    visibility="visible",
+    favorite_only=False,
 ):
     all_gifs = fetch_gifs_for_gallery(
         conn,
@@ -346,6 +430,8 @@ def fetch_gifs(
         tag_ids,
         series_only=series_only,
         series_id=series_id,
+        visibility=visibility,
+        favorite_only=favorite_only,
     )
     if limit is None:
         return all_gifs
@@ -416,6 +502,8 @@ def swap_gallery_order(
     tag_ids=None,
     series_only=False,
     series_id=None,
+    visibility="visible",
+    favorite_only=False,
 ):
     if series_only or series_id:
         return False
@@ -425,6 +513,8 @@ def swap_gallery_order(
         tag_ids,
         series_only=series_only,
         series_id=series_id,
+        visibility=visibility,
+        favorite_only=favorite_only,
     )
     standalone_ids = [g["id"] for g in gifs if not g["series_id"]]
     if gif_id not in standalone_ids:

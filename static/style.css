@@ -109,6 +109,11 @@ a {
   flex-shrink: 0;
 }
 
+.header-filter-toggle-active {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--tag-active-border);
+}
+
 .sidebar-toggle {
   flex-shrink: 0;
   margin: 0;
@@ -160,29 +165,6 @@ a {
 }
 
 .filter-panel-collapsed {
-  padding-bottom: 0.5rem;
-}
-
-.filter-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.filter-panel-heading {
-  margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.filter-panel-toggle {
-  flex-shrink: 0;
-}
-
-.filter-panel-collapsed .filter-panel-body {
   display: none;
 }
 
@@ -254,6 +236,9 @@ a {
 }
 
 .upload-waiting {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
   margin: 0.75rem 0 0;
   padding: 0.65rem 0.75rem;
   border-radius: 6px;
@@ -265,6 +250,123 @@ a {
 
 .upload-waiting[hidden] {
   display: none;
+}
+
+.upload-spinner {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.1rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: upload-spin 0.75s linear infinite;
+}
+
+.upload-waiting-text {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+@keyframes upload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.upload-resolve-page {
+  max-width: 36rem;
+  margin: 1.5rem auto;
+  padding: 0 1rem 2rem;
+}
+
+.upload-conflict-block {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+.upload-conflict-block legend {
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.upload-conflict-existing {
+  margin: 0 0 0.65rem;
+}
+
+.upload-conflict-digest {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.upload-conflict-verdict {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.upload-conflict-same {
+  color: var(--success, #2d8a4e);
+}
+
+.upload-conflict-diff {
+  color: var(--warning, #b8860b);
+}
+
+.upload-conflict-hashes {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.upload-conflict-hashes > div + div {
+  margin-top: 0.45rem;
+}
+
+.upload-conflict-hashes dt {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.upload-conflict-hashes dd {
+  margin: 0.15rem 0 0;
+}
+
+.upload-conflict-hashes .hash-value {
+  display: block;
+  word-break: break-all;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.upload-conflict-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.4rem 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.upload-conflict-option input {
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.upload-resolve-form .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
 }
 
 .layout {
@@ -518,6 +620,26 @@ a {
   width: 100%;
 }
 
+.gif-card-hidden .gif-image {
+  opacity: 0.72;
+}
+
+.filter-visibility-hint {
+  margin: 0.15rem 0 0 3.85rem;
+  font-size: 0.72rem;
+}
+
+.btn-favorite {
+  min-width: 2rem;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+}
+
+.btn-favorite-on {
+  color: var(--accent);
+}
+
 .gif-card-header {
   display: flex;
   justify-content: space-between;
@@ -589,6 +711,32 @@ a {
 
 .app-dialog-wide {
   max-width: min(640px, 94vw);
+}
+
+.app-dialog-confirm {
+  max-width: min(420px, 92vw);
+}
+
+.app-dialog-confirm-body {
+  padding-top: 0.5rem;
+  padding-bottom: 0.75rem;
+}
+
+.app-dialog-confirm-message {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.app-dialog-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .app-dialog::backdrop {
@@ -731,6 +879,12 @@ a {
   padding: 0.5rem 1.5rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: opacity 0.4s ease;
+}
+
+.flash-messages--hiding {
+  opacity: 0;
 }
 
 .flash-error {

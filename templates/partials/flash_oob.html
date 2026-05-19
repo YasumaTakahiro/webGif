@@ -1,0 +1,16 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div
+      id="flash-messages"
+      class="flash-messages"
+      role="status"
+      aria-live="polite"
+      title="クリックで閉じる"
+      hx-swap-oob="true"
+    >
+      {% for category, message in messages %}
+        <p class="flash flash-{{ category }}">{{ message }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
