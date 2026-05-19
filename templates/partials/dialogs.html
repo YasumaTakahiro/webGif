@@ -1,0 +1,35 @@
+<dialog id="dialog-upload" class="app-dialog" aria-labelledby="dialog-upload-title">
+  <div class="app-dialog-inner">
+    <header class="app-dialog-header">
+      <h2 id="dialog-upload-title" class="app-dialog-title">アップロード</h2>
+      <button type="button" class="btn btn-ghost btn-small dialog-close" data-dialog-close aria-label="閉じる">閉じる</button>
+    </header>
+    <div class="app-dialog-body panel panel-upload">
+      {% include "partials/upload_panel.html" %}
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dialog-manage" class="app-dialog app-dialog-wide" aria-labelledby="dialog-manage-title">
+  <div class="app-dialog-inner">
+    <header class="app-dialog-header">
+      <h2 id="dialog-manage-title" class="app-dialog-title">カテゴリ・タグの管理</h2>
+      <button type="button" class="btn btn-ghost btn-small dialog-close" data-dialog-close aria-label="閉じる">閉じる</button>
+    </header>
+    <div class="app-dialog-body" id="dialog-manage-body">
+      {% include "partials/filters_manage.html" %}
+    </div>
+  </div>
+</dialog>
+
+<dialog id="dialog-series" class="app-dialog app-dialog-wide" aria-labelledby="dialog-series-title">
+  <div class="app-dialog-inner">
+    <header class="app-dialog-header">
+      <h2 id="dialog-series-title" class="app-dialog-title">シリーズ</h2>
+      <button type="button" class="btn btn-ghost btn-small dialog-close" data-dialog-close aria-label="閉じる">閉じる</button>
+    </header>
+    <div class="app-dialog-body" id="dialog-series-body">
+      {% include "partials/series_manage.html" %}
+    </div>
+  </div>
+</dialog>

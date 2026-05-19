@@ -299,10 +299,12 @@ def create_app():
                 else:
                     title = _title_from_filename(file.filename)
 
+                gallery_order = db.next_gallery_order(conn)
                 cur = conn.execute(
-                    "INSERT INTO gifs (filename, title, category_id, created_at) "
-                    "VALUES (?, ?, ?, ?)",
-                    (stored, title, category_id, db.now_jst()),
+                    "INSERT INTO gifs "
+                    "(filename, title, category_id, gallery_order, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (stored, title, category_id, gallery_order, db.now_jst()),
                 )
                 db.set_gif_tags(conn, cur.lastrowid, tag_ids)
                 uploaded += 1
@@ -395,6 +397,42 @@ def create_app():
                 **list_ctx,
             )
         return redirect(url_for("index"))
+
+    @app.route("/gifs/<int:gif_id>/gallery-shift", methods=["POST"])
+    def shift_gif_gallery_order(gif_id):
+        direction = request.form.get("direction", "up")
+        with db.get_db() as conn:
+            ok = db.swap_gallery_order(
+                conn,
+                gif_id,
+                direction,
+                category_id=None
+                if _series_filter_active()
+                else request.args.get("category", type=int),
+                tag_ids=[] if _series_filter_active() else _active_tag_ids(),
+                series_only=_series_only() and not _active_series_id(),
+                series_id=_active_series_id(),
+            )
+            if not ok:
+                flash("並び順を変更できませんでした。", "error")
+            else:
+                conn.commit()
+        if request.headers.get("HX-Request"):
+            with db.get_db() as conn:
+                if request.form.get("refresh_list"):
+                    list_ctx = _gif_list_context(conn, page=1)
+                    categories = db.fetch_categories(conn)
+                    tags = db.fetch_tags(conn)
+                    return render_template(
+                        "partials/gif_list_refresh.html",
+                        categories=categories,
+                        tags=tags,
+                        **list_ctx,
+                    )
+                gif = db.get_gif(conn, gif_id)
+            if gif:
+                return render_template("partials/gif_card.html", gif=gif)
+        return redirect(request.referrer or url_for("index"))
 
     @app.route("/gifs/<int:gif_id>/series-shift", methods=["POST"])
     def shift_gif_series_order(gif_id):

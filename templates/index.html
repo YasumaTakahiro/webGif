@@ -1,15 +1,11 @@
 {% extends "base.html" %}
 
 {% block header_actions %}
-<button
-  type="button"
-  class="btn btn-ghost btn-small sidebar-toggle"
-  id="sidebar-toggle"
-  aria-expanded="true"
-  aria-controls="sidebar"
->
-  パネルを隠す
-</button>
+<nav class="header-toolbar" aria-label="管理メニュー">
+  <button type="button" class="btn btn-ghost btn-small" data-dialog-open="dialog-upload">アップロード</button>
+  <button type="button" class="btn btn-ghost btn-small" data-dialog-open="dialog-manage">カテゴリ・タグ</button>
+  <button type="button" class="btn btn-ghost btn-small" data-dialog-open="dialog-series">シリーズ</button>
+</nav>
 {% endblock %}
 
 {% block filter_panel %}
@@ -17,74 +13,18 @@
 {% endblock %}
 
 {% block content %}
-<aside class="sidebar" id="sidebar">
-  <section class="panel panel-upload">
-    <h2>アップロード</h2>
-    <p class="hint form-action-hint">
-      送信先: <code>{{ url_for('upload_gif', _external=True) }}</code>
-    </p>
-    <form
-      class="upload-form"
-      action="{{ url_for('upload_gif') }}"
-      method="post"
-      enctype="multipart/form-data"
-      novalidate
-    >
-      <label class="field">
-        <span>画像ファイル（複数選択可）</span>
-        <input type="file" name="files" accept="{{ accept_images }}" multiple>
-        <p class="hint">対応: GIF / PNG / JPEG / WebP。選べない場合は「すべてのファイル」を選んでください。</p>
-      </label>
-      <label class="field">
-        <span>タイトル（任意・1 件のみ）</span>
-        <input type="text" name="title" maxlength="120" placeholder="1 件だけのときに使用">
-      </label>
-      <label class="field">
-        <span>カテゴリ</span>
-        <select name="category_id" id="upload-category-select">
-          <option value="">未分類</option>
-          {% for c in categories %}
-            <option value="{{ c.id }}">{{ c.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <fieldset class="field tag-checkboxes">
-        <legend>タグ</legend>
-        {% if tags %}
-          {% for t in tags %}
-            <label class="checkbox-inline">
-              <input type="checkbox" name="tag_ids" value="{{ t.id }}">
-              {{ t.name }}
-            </label>
-          {% endfor %}
-        {% else %}
-          <p class="hint">管理パネルで先にタグを作れます。</p>
-        {% endif %}
-      </fieldset>
-      <button type="submit" class="btn btn-primary">追加</button>
-    </form>
-    <p class="upload-waiting" id="upload-waiting" hidden></p>
-    <p class="hint upload-note">
-      送信が始まるとブラウザのタブが読み込み中になります。Dev Container では大きい GIF で数分かかることがあります。<br>
-      進捗は <code>webgif.log</code> の <code>upload saved:</code> でも確認できます。
-    </p>
-  </section>
-
-  <section class="panel" id="filters-manage-panel">
-    {% include "partials/filters_manage.html" %}
-  </section>
-</aside>
-
 <section class="gallery" id="gallery">
   <div id="gif-list">
     {% include "partials/gif_list.html" %}
   </div>
 </section>
+
+{% include "partials/dialogs.html" %}
 {% endblock %}
 
 {% block scripts %}
 <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-<script src="{{ url_for('static', filename='sidebar.js') }}"></script>
 <script src="{{ url_for('static', filename='filter_panel.js') }}"></script>
+<script src="{{ url_for('static', filename='dialogs.js') }}"></script>
 <script src="{{ url_for('static', filename='upload.js') }}"></script>
 {% endblock %}

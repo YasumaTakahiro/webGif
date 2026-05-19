@@ -8,9 +8,24 @@
   const defaultLabel = submit ? submit.textContent : "";
   let submitting = false;
 
+  function hasFiles() {
+    return Boolean(input?.files?.length);
+  }
+
+  function updateSubmitState() {
+    if (!submit || submitting) return;
+    submit.disabled = !hasFiles();
+  }
+
+  input?.addEventListener("change", updateSubmitState);
+
   form.addEventListener("submit", (event) => {
     const files = input?.files;
-    if (!files || !files.length) return;
+    if (!files || !files.length) {
+      event.preventDefault();
+      updateSubmitState();
+      return;
+    }
 
     if (submitting) {
       event.preventDefault();
@@ -38,11 +53,13 @@
   window.addEventListener("pageshow", () => {
     submitting = false;
     if (submit) {
-      submit.disabled = false;
       submit.textContent = defaultLabel;
     }
     if (waiting) {
       waiting.hidden = true;
     }
+    updateSubmitState();
   });
+
+  updateSubmitState();
 })();

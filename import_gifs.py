@@ -132,11 +132,21 @@ def import_folder(
                     order = series_order
                     series_order += 1
 
+            gallery_order = None if series_id else db.next_gallery_order(conn)
             cur = conn.execute(
                 "INSERT INTO gifs "
-                "(filename, title, category_id, series_id, series_order, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (stored, title, category_id, series_id, order, db.now_jst()),
+                "(filename, title, category_id, series_id, series_order, "
+                "gallery_order, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    stored,
+                    title,
+                    category_id,
+                    series_id,
+                    order,
+                    gallery_order,
+                    db.now_jst(),
+                ),
             )
             db.set_gif_tags(conn, cur.lastrowid, tag_ids)
             imported += 1

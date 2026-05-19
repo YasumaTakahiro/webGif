@@ -56,7 +56,27 @@
           placeholder="1, 2, 3…"
         >
       </label>
-      {% if gif.series_id and gif.series_order %}
+      {% if not gif.series_id %}
+        <div class="series-shift-row">
+          <span class="hint">表示順</span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-small"
+            hx-post="{{ url_for('shift_gif_gallery_order', gif_id=gif.id, **gallery_query()) }}"
+            hx-vals='{"direction": "up", "refresh_list": "1"}'
+            hx-target="#gif-list"
+            hx-swap="innerHTML"
+          >↑ 前へ</button>
+          <button
+            type="button"
+            class="btn btn-ghost btn-small"
+            hx-post="{{ url_for('shift_gif_gallery_order', gif_id=gif.id, **gallery_query()) }}"
+            hx-vals='{"direction": "down", "refresh_list": "1"}'
+            hx-target="#gif-list"
+            hx-swap="innerHTML"
+          >↓ 後へ</button>
+        </div>
+      {% elif gif.series_id and gif.series_order %}
         <div class="series-shift-row">
           <button
             type="button"

@@ -40,6 +40,34 @@ def _migrate(conn):
         )
     if "series_order" not in cols:
         conn.execute("ALTER TABLE gifs ADD COLUMN series_order INTEGER")
+    _migrate_gallery_order(conn)
+
+
+def _migrate_gallery_order(conn):
+    """シリーズ未所属 GIF 用の表示順（gallery_order）。"""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS _schema_migrations (name TEXT PRIMARY KEY)"
+    )
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(gifs)").fetchall()}
+    if "gallery_order" not in cols:
+        conn.execute("ALTER TABLE gifs ADD COLUMN gallery_order INTEGER")
+
+    if conn.execute(
+        "SELECT 1 FROM _schema_migrations WHERE name = 'gallery_order_backfill'"
+    ).fetchone():
+        return
+
+    rows = conn.execute(
+        "SELECT id FROM gifs WHERE series_id IS NULL ORDER BY id"
+    ).fetchall()
+    for i, row in enumerate(rows):
+        conn.execute(
+            "UPDATE gifs SET gallery_order = ? WHERE id = ? AND gallery_order IS NULL",
+            ((i + 1) * 10, row["id"]),
+        )
+    conn.execute(
+        "INSERT INTO _schema_migrations (name) VALUES ('gallery_order_backfill')"
+    )
 
 
 def _migrate_created_at_to_jst(conn):
@@ -188,7 +216,12 @@ def _sort_gallery_rows(rows):
         if series_id:
             by_series.setdefault(series_id, []).append(row)
         else:
-            slots.append((row["id"], [row]))
+            anchor = (
+                row["gallery_order"]
+                if row["gallery_order"] is not None
+                else row["id"]
+            )
+            slots.append((anchor, [row]))
 
     for group in by_series.values():
         group = _sort_series_group(group)
@@ -348,14 +381,81 @@ def set_gif_tags(conn, gif_id, tag_ids):
 def set_gif_series(conn, gif_id, series_id, series_order):
     if series_id:
         conn.execute(
-            "UPDATE gifs SET series_id = ?, series_order = ? WHERE id = ?",
+            "UPDATE gifs SET series_id = ?, series_order = ?, gallery_order = NULL "
+            "WHERE id = ?",
             (series_id, series_order, gif_id),
         )
     else:
+        order = next_gallery_order(conn, exclude_gif_id=gif_id)
         conn.execute(
-            "UPDATE gifs SET series_id = NULL, series_order = NULL WHERE id = ?",
-            (gif_id,),
+            "UPDATE gifs SET series_id = NULL, series_order = NULL, "
+            "gallery_order = COALESCE(gallery_order, ?) WHERE id = ?",
+            (order, gif_id),
         )
+
+
+def next_gallery_order(conn, exclude_gif_id=None):
+    sql = (
+        "SELECT COALESCE(MAX(gallery_order), 0) + 10 AS n FROM gifs "
+        "WHERE series_id IS NULL"
+    )
+    params = []
+    if exclude_gif_id:
+        sql += " AND id != ?"
+        params.append(exclude_gif_id)
+    row = conn.execute(sql, params).fetchone()
+    return row["n"] if row else 10
+
+
+def swap_gallery_order(
+    conn,
+    gif_id,
+    direction,
+    *,
+    category_id=None,
+    tag_ids=None,
+    series_only=False,
+    series_id=None,
+):
+    if series_only or series_id:
+        return False
+    gifs = fetch_gifs_for_gallery(
+        conn,
+        category_id,
+        tag_ids,
+        series_only=series_only,
+        series_id=series_id,
+    )
+    standalone_ids = [g["id"] for g in gifs if not g["series_id"]]
+    if gif_id not in standalone_ids:
+        return False
+    idx = standalone_ids.index(gif_id)
+    if direction == "up" and idx > 0:
+        other_id = standalone_ids[idx - 1]
+    elif direction == "down" and idx < len(standalone_ids) - 1:
+        other_id = standalone_ids[idx + 1]
+    else:
+        return False
+
+    cur = conn.execute(
+        "SELECT gallery_order FROM gifs WHERE id = ?", (gif_id,)
+    ).fetchone()
+    other = conn.execute(
+        "SELECT gallery_order FROM gifs WHERE id = ?", (other_id,)
+    ).fetchone()
+    if not cur or not other:
+        return False
+    a_order = cur["gallery_order"]
+    b_order = other["gallery_order"]
+    if a_order is None or b_order is None:
+        return False
+    conn.execute(
+        "UPDATE gifs SET gallery_order = ? WHERE id = ?", (b_order, gif_id)
+    )
+    conn.execute(
+        "UPDATE gifs SET gallery_order = ? WHERE id = ?", (a_order, other_id)
+    )
+    return True
 
 
 def next_series_order(conn, series_id, exclude_gif_id=None):

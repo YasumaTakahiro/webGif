@@ -1,0 +1,48 @@
+<p class="hint form-action-hint">
+  送信先: <code>{{ url_for('upload_gif', _external=True) }}</code>
+</p>
+<form
+  class="upload-form"
+  action="{{ url_for('upload_gif') }}"
+  method="post"
+  enctype="multipart/form-data"
+  novalidate
+>
+  <label class="field">
+    <span>画像ファイル（複数選択可）</span>
+    <input type="file" name="files" accept="{{ accept_images }}" multiple>
+    <p class="hint">対応: GIF / PNG / JPEG / WebP。選べない場合は「すべてのファイル」を選んでください。</p>
+  </label>
+  <label class="field">
+    <span>タイトル（任意・1 件のみ）</span>
+    <input type="text" name="title" maxlength="120" placeholder="1 件だけのときに使用">
+  </label>
+  <label class="field">
+    <span>カテゴリ</span>
+    <select name="category_id" id="upload-category-select">
+      <option value="">未分類</option>
+      {% for c in categories %}
+        <option value="{{ c.id }}">{{ c.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <fieldset class="field tag-checkboxes">
+    <legend>タグ</legend>
+    {% if tags %}
+      {% for t in tags %}
+        <label class="checkbox-inline">
+          <input type="checkbox" name="tag_ids" value="{{ t.id }}">
+          {{ t.name }}
+        </label>
+      {% endfor %}
+    {% else %}
+      <p class="hint">「カテゴリ・タグ」から先にタグを作れます。</p>
+    {% endif %}
+  </fieldset>
+  <button type="submit" class="btn btn-primary" id="upload-submit" disabled>追加</button>
+</form>
+<p class="upload-waiting" id="upload-waiting" hidden></p>
+<p class="hint upload-note">
+  送信が始まるとブラウザのタブが読み込み中になります。Dev Container では大きい GIF で数分かかることがあります。<br>
+  進捗は <code>webgif.log</code> の <code>upload saved:</code> でも確認できます。
+</p>
